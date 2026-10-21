@@ -7,9 +7,10 @@ export function soqlEscape(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
-// Same, plus the LIKE wildcards % and _ (escaped with a backslash).
+// Same, plus the LIKE wildcards % and _ (escaped with a backslash). One chain, backslash first, so that every
+// backslash this function adds is never escaped again.
 export function soqlEscapeLike(value: string): string {
-  return soqlEscape(value).replace(/%/g, '\\%').replace(/_/g, '\\_');
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 const DOMAIN_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;

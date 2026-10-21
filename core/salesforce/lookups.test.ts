@@ -77,3 +77,11 @@ test('pickAccountByDomain skips LIKE false positives and keeps query order', () 
   assert.equal(pickAccountByDomain(rows, 'other.com'), null);
   assert.equal(pickAccountByDomain([], 'acme.com'), null);
 });
+
+test('soqlEscapeLike is exactly soqlEscape plus the LIKE wildcards, for hostile inputs', () => {
+  const old = (v: string) => soqlEscape(v).replace(/%/g, '\\%').replace(/_/g, '\\_');
+  for (const v of ['', 'plain', "o'brien", 'a\\b', "\\'", "x\\' OR Name LIKE '%", '100%_sure', '\\%', '\\\\', "'\\'", 'é_%\\\'']) {
+    assert.equal(soqlEscapeLike(v), old(v), JSON.stringify(v));
+  }
+  assert.equal(soqlEscapeLike("a_b%c'd\\e"), "a\\_b\\%c\\'d\\\\e");
+});
