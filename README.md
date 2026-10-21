@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Cross-platform: Shopify × Salesforce | Open for PRs & Discussions
 
-> 📋 **Status: developer preview, not released.** Built and tested on a developer's machine: signed-webhook gateway, durable Postgres queue with retries and dead-letter replay, Salesforce client, executor with dry-run and a kill switch, sync log with retention, encrypted stored credentials, recipe R1, a single-operator admin page, and handlers for the Shopify privacy webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and `app/uninstalled`. R1 has been exercised against one Salesforce Developer org and one Shopify development store, including a real storefront order. It has **not** been deployed anywhere or reviewed by Shopify, the privacy-webhook handlers have not yet been tested with real Shopify deliveries (nothing registers those subscriptions with Shopify yet), and there is no install or deploy guide. Working name; Shopify's naming rules restrict "Shopify" in app names and URLs, so check the current requirement before choosing a listing name.
+> 📋 **Status: developer preview, not released.** Built and tested on a developer's machine: signed-webhook gateway, durable Postgres queue with retries and dead-letter replay, Salesforce client, executor with dry-run and a kill switch, sync log with retention, encrypted stored credentials, recipe R1, a single-operator admin page, and handlers for the Shopify privacy webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and `app/uninstalled`. R1 has been exercised against one Salesforce Developer org and one Shopify development store, including a real storefront order. It has **not** been deployed anywhere or reviewed by Shopify, of the privacy-webhook handlers only `app/uninstalled` has been verified with a real Shopify delivery (the three privacy topics are tested with signed requests; a real `customers/redact` or `shop/redact` has not been observed, and Shopify's CLI sample payloads cannot exercise them), and the deploy guide is a draft that has not been followed on a live host. Working name; Shopify's naming rules restrict "Shopify" in app names and URLs, so check the current requirement before choosing a listing name.
 
 
 ### Run it locally (developer preview)
@@ -123,9 +123,9 @@ Connectors exist (Salesforce's own commerce tooling, iPaaS vendors, paid Shopify
 ## 8. Open-Source Roadmap & Good First Issues
 - [x] Core: HMAC verify, dedupe, queue, retries, sync log, kill switch _(built and tested locally; not deployed)_
 - [x] Salesforce client against a Developer org (External Client App) _(client credentials; exercised against one Developer org)_
-- [x] R1 with dry-run, existing-account check and consent filter _(exercised in one Developer org and one dev store; the case of a storefront order with the marketing box unticked has not been observed)_
+- [x] R1 with dry-run, existing-account check and consent filter _(exercised in one Developer org and one dev store with real storefront orders: marketing box ticked creates a Lead and a repeat buyer updates it, unticked is skipped)_
 - [x] Admin UI: connection, recipe settings, log with replay
-- [x] Privacy-webhook handlers with real redaction _(tested with signed requests; not yet registered with or tested against real Shopify deliveries)_
+- [x] Privacy-webhook handlers with real redaction _(tested with signed requests; `app/uninstalled` verified with a real Shopify delivery; a real `customers/redact` or `shop/redact` has not been observed)_
 - [ ] Self-host guide (Railway) + custom-app install guide
 - [ ] R2 VIP Threshold Alert
 - [ ] R3 Closed-Won → Draft Order + sample Flow
