@@ -1,0 +1,44 @@
+{
+  "id": "F02d",
+  "case": "Malformed email: three parts",
+  "event": {
+    "orderId": "gid://shopify/Order/1001",
+    "orderName": "#1001",
+    "currency": "USD",
+    "total": 250,
+    "productTitles": [
+      "Widget A",
+      "Widget B"
+    ],
+    "customer": {
+      "id": "gid://shopify/Customer/55",
+      "email": "a@b@c.com",
+      "lastName": "Smith",
+      "marketingConsent": true
+    },
+    "billingCompany": null
+  },
+  "ctx": {
+    "accountByDomain": null,
+    "existingByEmail": null
+  },
+  "config": {
+    "allowDomains": [],
+    "denyDomains": [],
+    "freeEmailBlocklist": [
+      "gmail.com",
+      "yahoo.com",
+      "hotmail.com",
+      "outlook.com"
+    ],
+    "minOrderTotal": 0,
+    "requireConsent": true,
+    "existingLeadAction": "update",
+    "leadSource": "Shopify Order",
+    "companyOverride": null,
+    "leadOwnerId": null
+  },
+  "expected": {
+    "skip": "no_email"
+  }
+}

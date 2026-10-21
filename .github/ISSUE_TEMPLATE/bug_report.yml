@@ -1,0 +1,78 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you post:** never paste webhook payloads containing real customer data, secrets, tokens, or logs that contain them. Redact emails, names, addresses, shop domains you do not want public, and any Salesforce or Shopify identifiers.
+
+        **Security vulnerabilities do not belong here.** Use the private route in the [security policy](https://github.com/arsalan-arshad/bridge-recipes/security/policy) (see SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the actual behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic or test data only.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD`, or the release you ran.
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+    validations:
+      required: true
+  - type: input
+    id: postgres-version
+    attributes:
+      label: Postgres version
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      description: Was the recipe in dry-run or live mode?
+      options:
+        - Dry-run
+        - Live
+        - Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitised log output
+      description: Only redacted output. Remove emails, tokens, secrets and customer data before pasting.
+      render: text
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed all secrets, tokens and real customer data from this report.
+          required: true

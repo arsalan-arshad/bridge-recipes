@@ -1,0 +1,59 @@
+{
+  "id": "F10",
+  "case": "Domain matches an Account",
+  "event": {
+    "orderId": "gid://shopify/Order/1001",
+    "orderName": "#1001",
+    "currency": "USD",
+    "total": 250,
+    "productTitles": [
+      "Widget A",
+      "Widget B"
+    ],
+    "customer": {
+      "id": "gid://shopify/Customer/55",
+      "email": "buyer@acme.com",
+      "lastName": "Smith",
+      "marketingConsent": true
+    },
+    "billingCompany": null
+  },
+  "ctx": {
+    "accountByDomain": {
+      "id": "001ACC",
+      "ownerId": "005OWN"
+    },
+    "existingByEmail": null
+  },
+  "config": {
+    "allowDomains": [],
+    "denyDomains": [],
+    "freeEmailBlocklist": [
+      "gmail.com",
+      "yahoo.com",
+      "hotmail.com",
+      "outlook.com"
+    ],
+    "minOrderTotal": 0,
+    "requireConsent": true,
+    "existingLeadAction": "update",
+    "leadSource": "Shopify Order",
+    "companyOverride": null,
+    "leadOwnerId": null
+  },
+  "expected": {
+    "ops": [
+      {
+        "kind": "createTask",
+        "matchKey": "r1:gid://shopify/Order/1001",
+        "fields": {
+          "Subject": "Shopify order #1001 from acme.com",
+          "Description": "Order #1001: Widget A, Widget B. Total: 250 USD"
+        },
+        "ownerId": "005OWN",
+        "accountId": "001ACC",
+        "contactId": null
+      }
+    ]
+  }
+}

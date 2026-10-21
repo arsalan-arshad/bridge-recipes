@@ -1,0 +1,47 @@
+{
+  "id": "F22",
+  "case": "Existing Lead AND no consent: no_consent (rule 4 before 5)",
+  "event": {
+    "orderId": "gid://shopify/Order/1001",
+    "orderName": "#1001",
+    "currency": "USD",
+    "total": 250,
+    "productTitles": [
+      "Widget A",
+      "Widget B"
+    ],
+    "customer": {
+      "id": "gid://shopify/Customer/55",
+      "email": "buyer@acme.com",
+      "lastName": "Smith",
+      "marketingConsent": false
+    },
+    "billingCompany": null
+  },
+  "ctx": {
+    "accountByDomain": null,
+    "existingByEmail": {
+      "type": "Lead",
+      "id": "00QLEAD"
+    }
+  },
+  "config": {
+    "allowDomains": [],
+    "denyDomains": [],
+    "freeEmailBlocklist": [
+      "gmail.com",
+      "yahoo.com",
+      "hotmail.com",
+      "outlook.com"
+    ],
+    "minOrderTotal": 0,
+    "requireConsent": true,
+    "existingLeadAction": "update",
+    "leadSource": "Shopify Order",
+    "companyOverride": null,
+    "leadOwnerId": null
+  },
+  "expected": {
+    "skip": "no_consent"
+  }
+}

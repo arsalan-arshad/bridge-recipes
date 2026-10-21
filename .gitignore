@@ -1,0 +1,35 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependencies & build output
+node_modules/
+build/
+dist/
+coverage/
+.cache/
+
+# Shopify CLI local state
+.shopify/
+.shopifyapp/
+
+# Local databases
+*.sqlite
+*.sqlite-journal
+*.sqlite3
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editor / OS / local tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/settings.local.json
+
+# One-time webhook captures from a dev store (contain test customer data)
+captures/

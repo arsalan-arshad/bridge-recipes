@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bridge_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bridge_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway CI database service; the credentials are not secrets.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/bridge_ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run tests (database suites included)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+
+      - name: Fail on zero or skipped tests
+        shell: bash
+        run: |
+          tests=$(sed -n -E 's/^(#|ℹ) tests ([0-9]+)$/\2/p' test-output.txt | tail -n 1)
+          skipped=$(sed -n -E 's/^(#|ℹ) skipped ([0-9]+)$/\2/p' test-output.txt | tail -n 1)
+          echo "tests=${tests:-missing} skipped=${skipped:-missing}"
+          if [ -z "$tests" ] || [ "$tests" -eq 0 ]; then
+            echo "::error::The test summary shows no tests."
+            exit 1
+          fi
+          if [ -z "$skipped" ] || [ "$skipped" -ne 0 ]; then
+            echo "::error::Tests were skipped (or the summary is missing); the database suites must really run."
+            exit 1
+          fi
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high

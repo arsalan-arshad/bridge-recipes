@@ -1,0 +1,21 @@
+{
+  "_note": "SYNTHETIC: hand-written from docs, NOT a captured orders/paid payload. Replace with a real dev-store capture.",
+  "id": 1001,
+  "admin_graphql_api_id": "gid://shopify/Order/1001",
+  "name": "#1001",
+  "currency": "USD",
+  "total_price": "250.00",
+  "contact_email": "buyer@acme.com",
+  "buyer_accepts_marketing": true,
+  "line_items": [{ "title": "Widget A", "price": "100.00" }, { "title": "Widget B", "price": "150.00" }],
+  "billing_address": { "company": "Acme Corp", "phone": "+10000000000", "address1": "1 Main St" },
+  "customer": {
+    "id": 55,
+    "admin_graphql_api_id": "gid://shopify/Customer/55",
+    "email": "buyer@acme.com",
+    "first_name": "Pat",
+    "last_name": "Smith",
+    "phone": "+10000000000",
+    "email_marketing_consent": { "state": "subscribed", "opt_in_level": "single_opt_in", "consent_updated_at": null }
+  }
+}

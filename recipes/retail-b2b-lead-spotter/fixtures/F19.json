@@ -1,0 +1,59 @@
+{
+  "id": "F19",
+  "case": "Existing Lead AND matching Account: updateLead wins",
+  "event": {
+    "orderId": "gid://shopify/Order/1001",
+    "orderName": "#1001",
+    "currency": "USD",
+    "total": 250,
+    "productTitles": [
+      "Widget A",
+      "Widget B"
+    ],
+    "customer": {
+      "id": "gid://shopify/Customer/55",
+      "email": "buyer@acme.com",
+      "lastName": "Smith",
+      "marketingConsent": true
+    },
+    "billingCompany": null
+  },
+  "ctx": {
+    "accountByDomain": {
+      "id": "001ACC",
+      "ownerId": "005OWN"
+    },
+    "existingByEmail": {
+      "type": "Lead",
+      "id": "00QLEAD"
+    }
+  },
+  "config": {
+    "allowDomains": [],
+    "denyDomains": [],
+    "freeEmailBlocklist": [
+      "gmail.com",
+      "yahoo.com",
+      "hotmail.com",
+      "outlook.com"
+    ],
+    "minOrderTotal": 0,
+    "requireConsent": true,
+    "existingLeadAction": "update",
+    "leadSource": "Shopify Order",
+    "companyOverride": null,
+    "leadOwnerId": null
+  },
+  "expected": {
+    "ops": [
+      {
+        "kind": "updateLead",
+        "matchKey": "r1:gid://shopify/Order/1001",
+        "targetId": "00QLEAD",
+        "fields": {
+          "Description": "Order #1001: Widget A, Widget B. Total: 250 USD"
+        }
+      }
+    ]
+  }
+}

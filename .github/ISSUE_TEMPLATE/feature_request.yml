@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement or a new recipe idea
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is a small core plus narrow, opinionated recipes. Requests that would turn the core into a generic sync engine are better framed as a new recipe.
+
+        Never paste real customer data, secrets, tokens, or logs containing them. Vulnerabilities go through the [security policy](https://github.com/arsalan-arshad/bridge-recipes/security/policy), not here.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to achieve, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: Which trigger, filters and Salesforce write? Mention any new Shopify scope or Salesforce permission and why it is the minimum.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains no secrets or real customer data.
+          required: true

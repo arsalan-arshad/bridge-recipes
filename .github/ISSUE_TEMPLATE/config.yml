@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/arsalan-arshad/bridge-recipes/security/policy
+    about: Do not open a public issue for vulnerabilities. Follow the security policy (private advisory or email).

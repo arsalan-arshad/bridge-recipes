@@ -1,0 +1,58 @@
+{
+  "id": "F04",
+  "case": "@gmail.com on allowlist",
+  "event": {
+    "orderId": "gid://shopify/Order/1001",
+    "orderName": "#1001",
+    "currency": "USD",
+    "total": 250,
+    "productTitles": [
+      "Widget A",
+      "Widget B"
+    ],
+    "customer": {
+      "id": "gid://shopify/Customer/55",
+      "email": "buyer@gmail.com",
+      "lastName": "Smith",
+      "marketingConsent": true
+    },
+    "billingCompany": null
+  },
+  "ctx": {
+    "accountByDomain": null,
+    "existingByEmail": null
+  },
+  "config": {
+    "allowDomains": [
+      "gmail.com"
+    ],
+    "denyDomains": [],
+    "freeEmailBlocklist": [
+      "gmail.com",
+      "yahoo.com",
+      "hotmail.com",
+      "outlook.com"
+    ],
+    "minOrderTotal": 0,
+    "requireConsent": true,
+    "existingLeadAction": "update",
+    "leadSource": "Shopify Order",
+    "companyOverride": null,
+    "leadOwnerId": null
+  },
+  "expected": {
+    "ops": [
+      {
+        "kind": "createLead",
+        "matchKey": "r1:gid://shopify/Order/1001",
+        "fields": {
+          "Company": "gmail.com",
+          "LastName": "Smith",
+          "Email": "buyer@gmail.com",
+          "LeadSource": "Shopify Order",
+          "Description": "Order #1001: Widget A, Widget B. Total: 250 USD"
+        }
+      }
+    ]
+  }
+}

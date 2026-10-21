@@ -1,0 +1,19 @@
+{
+  "name": "bridge-recipes",
+  "version": "0.0.0",
+  "description": "Open-source Shopify to Salesforce bridge: a small shared core plus narrow, opinionated recipes (lead spotter, VIP alert, closed-won draft order).",
+  "license": "MIT",
+  "author": "Arsalan Arshad",
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.0"
+  },
+  "scripts": {
+    "start": "node core/app/main.ts",
+    "test": "node --env-file-if-exists=.env --test \"core/**/*.test.ts\" \"recipes/**/*.test.ts\""
+  },
+  "dependencies": {
+    "pg": "^8.23.1",
+    "pg-boss": "^12.38.0"
+  }
+}
