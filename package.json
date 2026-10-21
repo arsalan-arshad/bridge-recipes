@@ -1,6 +1,6 @@
 {
   "name": "bridge-recipes",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Open-source Shopify to Salesforce bridge: a small shared core plus narrow, opinionated recipes (lead spotter, VIP alert, closed-won draft order).",
   "license": "MIT",
   "author": "Arsalan Arshad",

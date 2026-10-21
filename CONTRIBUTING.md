@@ -20,3 +20,12 @@ says exactly what exists, and `docs/` holds the spec and build plan.
 - Security-sensitive changes (auth, webhooks, token storage, permissions) get extra scrutiny.
 
 See also the portfolio-level guide: `../CONTRIBUTING.md`.
+
+## Releases and deployment
+- `main` is protected: every change goes through a pull request that passes the `test` and CodeQL checks.
+- A merged pull request publishes a GitHub Release for the version in `package.json` if that version is new (see
+  `.github/workflows/release.yml`). To ship a version, bump it in your pull request: `npm version <x.y.z> --no-git-tag-version`.
+  Versions below 1.0.0 are marked as pre-releases. Release tags (`v*`) are protected from deletion and rewriting.
+- Deployment is done by the host's GitHub integration (documented in the deploy guide once it exists), not by a workflow
+  here; `.github/workflows/deploy-check.yml` then checks the production health endpoint when the repository variable
+  `PRODUCTION_URL` is set.

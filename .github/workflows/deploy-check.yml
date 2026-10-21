@@ -1,0 +1,43 @@
+name: Deploy check
+
+# Deployment itself is done by Railway's GitHub integration (it deploys main after CI passes; enable "Wait for CI").
+# This workflow then checks that the production service answers its health check. Set the repository variable
+# PRODUCTION_URL (Settings > Secrets and variables > Actions > Variables), for example https://your-app.up.railway.app.
+# Until it is set, this workflow only prints a notice.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  healthcheck:
+    name: healthcheck
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for the production health check
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -z "${PRODUCTION_URL:-}" ]; then
+            echo "::notice::PRODUCTION_URL is not set, so there is nothing to check yet."
+            exit 0
+          fi
+          case "$PRODUCTION_URL" in https://*) ;; *) echo "::error::PRODUCTION_URL must start with https://"; exit 1 ;; esac
+          for attempt in $(seq 1 40); do
+            if curl -fsS --max-time 10 "${PRODUCTION_URL%/}/healthz" >/dev/null; then
+              echo "Production is healthy (attempt $attempt)."
+              exit 0
+            fi
+            echo "Not healthy yet (attempt $attempt of 40); waiting 15 s for the deploy to finish."
+            sleep 15
+          done
+          echo "::error::Production did not become healthy within 10 minutes."
+          exit 1
