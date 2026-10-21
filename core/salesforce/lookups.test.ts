@@ -78,10 +78,20 @@ test('pickAccountByDomain skips LIKE false positives and keeps query order', () 
   assert.equal(pickAccountByDomain([], 'acme.com'), null);
 });
 
-test('soqlEscapeLike is exactly soqlEscape plus the LIKE wildcards, for hostile inputs', () => {
-  const old = (v: string) => soqlEscape(v).replace(/%/g, '\\%').replace(/_/g, '\\_');
-  for (const v of ['', 'plain', "o'brien", 'a\\b', "\\'", "x\\' OR Name LIKE '%", '100%_sure', '\\%', '\\\\', "'\\'", 'é_%\\\'']) {
-    assert.equal(soqlEscapeLike(v), old(v), JSON.stringify(v));
-  }
-  assert.equal(soqlEscapeLike("a_b%c'd\\e"), "a\\_b\\%c\\'d\\\\e");
+test('soqlEscapeLike escapes backslash, quote and the LIKE wildcards, with fixed expected outputs', () => {
+  const cases: [string, string][] = [
+    ['', ''],
+    ['plain', 'plain'],
+    ["o'brien", "o\\'brien"],
+    ['a\\b', 'a\\\\b'],
+    ["\\'", "\\\\\\'"],
+    ["x\\' OR Name LIKE '%", "x\\\\\\' OR Name LIKE \\'\\%"],
+    ['100%_sure', '100\\%\\_sure'],
+    ['\\%', '\\\\\\%'],
+    ['\\\\', '\\\\\\\\'],
+    ["a_b%c'd\\e", "a\\_b\\%c\\'d\\\\e"],
+  ];
+  for (const [input, expected] of cases) assert.equal(soqlEscapeLike(input), expected, JSON.stringify(input));
+  // and it agrees with soqlEscape wherever there is no wildcard
+  for (const v of ['plain', "o'brien", 'a\\b']) assert.equal(soqlEscapeLike(v), soqlEscape(v));
 });
