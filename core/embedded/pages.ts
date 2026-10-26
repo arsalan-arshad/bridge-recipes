@@ -86,8 +86,8 @@ export function homeFragment(d: HomeData): string {
 <s-paragraph>Salesforce connection: ${conn}</s-paragraph>
 <s-paragraph>${esc(r.name)}: ${mode}</s-paragraph>
 <s-paragraph>Failed jobs: ${failed}</s-paragraph>
-<s-paragraph><s-text color="subdued">${next ? `${esc(next)} ` : ''}Settings and failed-job replay move into this page next; until then use the ${operator}.</s-text></s-paragraph>
-<s-paragraph>${view('/app/api/setup', 'Set up Salesforce and the recipe', 'primary')}</s-paragraph>
+<s-paragraph><s-text color="subdued">${next ? `${esc(next)} ` : ''}Going live is done from the ${operator}.</s-text></s-paragraph>
+<s-paragraph>${view('/app/api/setup', 'Set up Salesforce and the recipe', 'primary')} ${view('/app/api/settings', 'Recipe settings')} ${view('/app/api/jobs', d.failedJobs === 0 ? 'Failed jobs' : `Failed jobs (${d.failedJobs})`)}</s-paragraph>
 </s-section>
 <s-section heading="Latest decisions">
 ${d.recent.length === 0 ? '<s-paragraph>No orders have been processed for this store yet.</s-paragraph>' : `<s-paragraph>Last ${d.recent.length} decision${d.recent.length === 1 ? '' : 's'}: ${countBadges}</s-paragraph>${decisionsTable(d.recent.slice(0, 5), false)}`}
@@ -125,6 +125,9 @@ export function logFragment(d: LogData): string {
 export const NOTICES: Record<string, { tone: 'success' | 'warning'; text: string }> = {
   connection_saved: { tone: 'success', text: 'Salesforce connection saved. The secret is stored encrypted and is never shown again. Use "Test connection".' },
   verified_ok: { tone: 'success', text: 'The Salesforce connection works.' },
+  config_saved: { tone: 'success', text: 'Settings saved.' },
+  replayed: { tone: 'success', text: 'Jobs moved back to the queue; the worker will retry them.' },
+  nothing_to_replay: { tone: 'warning', text: 'Nothing to replay.' },
   enabled_dry: { tone: 'success', text: 'Recipe enabled in DRY-RUN: it reads from Salesforce and logs what it would do, but writes nothing.' },
   disabled: { tone: 'warning', text: 'Recipe disabled (kill switch): no Salesforce calls from the next job on.' },
 };
@@ -138,6 +141,11 @@ export interface SetupData {
   connError?: string; // a connection problem (already free of secrets)
 }
 
+// The consumer key identifies the Salesforce app; staff do not need all of it. Show only the end, and nothing for a short one.
+export function maskKey(key: string): string {
+  return key.length > 8 ? `…${key.slice(-4)}` : '••••';
+}
+
 const field = (label: string, name: string, extra = '') => `<s-text-field label="${esc(label)}" name="${esc(name)}" autocomplete="off" ${extra}></s-text-field>`;
 
 export function setupFragment(d: SetupData): string {
@@ -148,7 +156,7 @@ export function setupFragment(d: SetupData): string {
   const connProblem = d.connError ? `<s-banner tone="critical" heading="Connection problem">${esc(d.connError)}</s-banner>` : '';
   const c = d.connection;
   const status = c.stored
-    ? `${badge('stored (encrypted)', 'success')} <s-text color="subdued">${c.lastVerifiedAt ? `last verified ${esc(c.lastVerifiedAt)}` : 'not verified yet'}</s-text>${c.loginUrl ? `<br><s-text color="subdued">Org: ${esc(c.loginUrl)}${c.clientId ? ` · client id: ${esc(c.clientId)}` : ''}</s-text>` : ''}`
+    ? `${badge('stored (encrypted)', 'success')} <s-text color="subdued">${c.lastVerifiedAt ? `last verified ${esc(c.lastVerifiedAt)}` : 'not verified yet'}</s-text>${c.loginUrl ? `<br><s-text color="subdued">Org: ${esc(c.loginUrl)}${c.clientId ? ` · client id: ${esc(maskKey(c.clientId))}` : ''}</s-text>` : ''}`
     : badge('not set', 'caution');
   const post = (path: string, inner: string) => `<form data-post="${esc(path)}">${inner}</form>`;
   const act = (value: string) => `<input type="hidden" name="action" value="${esc(value)}">`;
@@ -169,4 +177,74 @@ ${post('/app/api/recipe', `${act('enable_dry')}<s-button variant="primary" data-
 ${post('/app/api/recipe', `${act('disable')}<s-button tone="critical" data-submit>Kill switch: disable</s-button>`)}
 <s-paragraph><s-text color="subdued">Going live (writing Leads and Tasks to Salesforce) is not done from here: it needs the operator password, on the <s-link href="/admin" target="_blank">operator admin page</s-link>. From here you can connect, test, run in dry-run, and switch the recipe off.</s-text></s-paragraph>
 </s-section></s-page>`;
+}
+
+// ---- settings page: the recipe's own settings (the same fields as the operator page) ------------------------------------------------------------
+
+export interface SettingsData {
+  shop: string;
+  form: Record<string, string | boolean>; // the stored settings, or what the operator just typed when it was refused
+  msg?: string;
+  errors?: string[];
+}
+
+const text = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null || v === false ? '' : String(v));
+
+export function settingsFragment(d: SettingsData): string {
+  const f = d.form;
+  const note = d.msg && Object.hasOwn(NOTICES, d.msg) ? `<s-banner tone="${NOTICES[d.msg].tone}">${esc(NOTICES[d.msg].text)}</s-banner>` : '';
+  const problems = d.errors && d.errors.length ? `<s-banner tone="critical" heading="Settings not saved">${d.errors.map(esc).join('; ')}</s-banner>` : '';
+  const area = (label: string, name: string) => `<s-text-area label="${esc(label)}" name="${esc(name)}" rows="4" value="${esc(text(f[name]))}"></s-text-area>`;
+  const input = (label: string, name: string) => `<s-text-field label="${esc(label)}" name="${esc(name)}" autocomplete="off" value="${esc(text(f[name]))}"></s-text-field>`;
+  const existing = text(f.existingLeadAction) === 'skip' ? 'skip' : 'update';
+  return `<s-page heading="Recipe settings">
+<s-section><s-paragraph>${view('/app/api/home', 'Back to home')}</s-paragraph></s-section>
+${note}${problems}
+<s-section heading="Lead Spotter settings">
+<form data-post="/app/api/settings">
+${input('Lead source (a value from your Salesforce picklist)', 'leadSource')}
+${input('Minimum order total', 'minOrderTotal')}
+<s-checkbox label="Only customers who accepted marketing (strongly recommended; you are responsible for your lawful basis if you turn this off)" name="requireConsent"${f.requireConsent === true ? ' checked' : ''}></s-checkbox>
+<s-select label="When the email is already a Lead" name="existingLeadAction" value="${esc(existing)}"><s-option value="update">Add the order to the Lead's description</s-option><s-option value="skip">Skip</s-option></s-select>
+${input('Company name override (leave empty to use the billing company or the email domain)', 'companyOverride')}
+${input('Default Lead owner (Salesforce User id, 005...; empty = the integration user)', 'leadOwnerId')}
+${area('Always allow these email domains (one per line)', 'allowDomains')}
+${area('Never create Leads for these domains (one per line)', 'denyDomains')}
+${area('Free-mail domains to skip (one per line)', 'freeEmailBlocklist')}
+<s-button variant="primary" data-submit>Save settings</s-button>
+</form>
+<s-paragraph><s-text color="subdued">Saving settings never changes whether the recipe is on or live.</s-text></s-paragraph>
+</s-section></s-page>`;
+}
+
+// ---- failed jobs page: this shop's jobs that ran out of retries, with replay -------------------------------------------------------------------
+
+export interface JobView {
+  id: string;
+  topic: string;
+  businessKey: string;
+  webhookId: string;
+  deadAt: string;
+}
+
+export interface JobsData {
+  shop: string;
+  jobs: JobView[]; // ONLY this shop's
+  msg?: string;
+  errors?: string[];
+}
+
+export function jobsFragment(d: JobsData): string {
+  const note = d.msg && Object.hasOwn(NOTICES, d.msg) ? `<s-banner tone="${NOTICES[d.msg].tone}">${esc(NOTICES[d.msg].text)}</s-banner>` : '';
+  const problems = d.errors && d.errors.length ? `<s-banner tone="critical" heading="Not done">${d.errors.map(esc).join('; ')}</s-banner>` : '';
+  const rows = d.jobs.map((j) => `<s-table-row><s-table-cell>${esc(j.deadAt)}</s-table-cell><s-table-cell>${esc(j.topic)}</s-table-cell><s-table-cell><s-text type="code">${esc(j.businessKey)}</s-text></s-table-cell><s-table-cell><form data-post="/app/api/replay"><input type="hidden" name="id" value="${esc(j.id)}"><s-button data-submit>Replay</s-button></form></s-table-cell></s-table-row>`).join('');
+  const table = d.jobs.length === 0
+    ? '<s-paragraph>No failed jobs.</s-paragraph>'
+    : `<s-table><s-table-header-row><s-table-header>Failed (UTC)</s-table-header><s-table-header>Topic</s-table-header><s-table-header>Order</s-table-header><s-table-header></s-table-header></s-table-header-row><s-table-body>${rows}</s-table-body></s-table>`;
+  const all = d.jobs.length === 0 ? '' : `<s-paragraph><form data-post="/app/api/replay"><input type="hidden" name="id" value="all"><s-button variant="primary" data-submit>Replay all (${esc(d.jobs.length)})</s-button></form></s-paragraph>`;
+  return `<s-page heading="Failed jobs">
+<s-section><s-paragraph>${view('/app/api/home', 'Back to home')}</s-paragraph></s-section>
+${note}${problems}
+<s-section padding="none">${table}</s-section>
+<s-section><s-paragraph><s-text color="subdued">These jobs failed after all retries. Replaying moves a job back to the queue (for example after fixing the Salesforce connection). The order payload is kept for 14 days and is never shown here. You can only replay this store's jobs.</s-text></s-paragraph>${all}</s-section></s-page>`;
 }

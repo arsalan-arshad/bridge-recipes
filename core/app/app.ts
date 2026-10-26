@@ -22,7 +22,7 @@ import { createAdminHandler } from '../admin/handler.ts';
 import { handleLifecycleJob } from '../compliance/handlers.ts';
 import { LIFECYCLE_TOPICS } from '../compliance/topics.ts';
 import { deriveSessionKey } from '../admin/security.ts';
-import { createEmbeddedHandler, failedJobsFor } from '../embedded/handler.ts';
+import { createEmbeddedHandler, failedJobsFor, jobsFor } from '../embedded/handler.ts';
 import { PostgresAudit, PostgresComplianceLog, createDeadLetters, isOperatorShop, listShops } from '../queue/postgresAdminData.ts';
 import { verifyShop } from './admin.ts';
 import { configToForm, formToConfig } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
@@ -74,6 +74,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
     });
 
     const dead = createDeadLetters(rt.boss);
+    const adminRecipe = { id: R1_ID, name: 'Retail-to-B2B Lead Spotter', defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, toForm: configToForm, fromForm: formToConfig };
     const audit = new PostgresAudit(rt.pool, config.schema, now);
 
     // The operator admin UI exists only when ADMIN_PASSWORD is set; otherwise /admin falls through to the 404 below.
@@ -82,7 +83,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       trustProxy: config.trustProxy,
       sessionKey: deriveSessionKey(config.encryptionKey, config.adminPassword),
       now: () => now().getTime(),
-      recipe: { id: R1_ID, name: 'Retail-to-B2B Lead Spotter', defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, toForm: configToForm, fromForm: formToConfig },
+      recipe: adminRecipe,
       connections, configs, syncLog,
       shops: () => listShops(rt.pool, config.schema),
       verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }),
@@ -108,9 +109,12 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
         },
         recent: (f) => syncLog.recent(f),
         failedJobs: async (shop) => failedJobsFor(await dead.list(), shop),
+        jobs: async (shop) => jobsFor(await dead.list(), shop),
+        settingsForm: async (shop) => adminRecipe.toForm((await configs.get(shop, R1_ID))?.config ?? R1_DEFAULT_CONFIG),
       },
       actions: { recipe: { id: R1_ID, defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, fromForm: formToConfig }, connections, configs, verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }) },
       audit,
+      dead,
       now: () => now().getTime(),
       log,
     });

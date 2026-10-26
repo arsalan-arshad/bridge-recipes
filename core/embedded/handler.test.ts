@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createEmbeddedHandler, failedJobsFor } from './handler.ts';
+import { createEmbeddedHandler, failedJobsFor, jobsFor } from './handler.ts';
 import type { EmbeddedData } from './handler.ts';
 import type { ActionDeps } from '../admin/actions.ts';
 import { ConfigValidationError } from '../../recipes/retail-b2b-lead-spotter/validateConfig.ts';
@@ -35,6 +35,8 @@ function fakeData(over: Partial<EmbeddedData> = {}) {
     summary: async (shop) => { calls.push(`summary ${shop}`); return { connection: { stored: true, lastVerifiedAt: '2026-10-26T10:00:00Z' }, recipe: { name: 'R1', configured: true, enabled: true, dryRun: true } }; },
     recent: async (f) => { calls.push(`recent ${JSON.stringify(f)}`); return [entry()]; },
     failedJobs: async (shop) => { calls.push(`failed ${shop}`); return 0; },
+    jobs: async (shop) => { calls.push(`jobs ${shop}`); return []; },
+    settingsForm: async (shop) => { calls.push(`settingsForm ${shop}`); return { leadSource: 'Stored', minOrderTotal: '5', requireConsent: true, existingLeadAction: 'update', companyOverride: '', leadOwnerId: '', allowDomains: '', denyDomains: '', freeEmailBlocklist: '' }; },
     ...over,
   };
   return { data, calls };
@@ -63,12 +65,18 @@ function fakeWrites(opts: { verify?: ActionDeps['verify']; auditFails?: boolean 
   return { actions, audit, settings, connections, audits };
 }
 
-async function withServer(fn: (url: string, logs: string[], calls: string[], w: ReturnType<typeof fakeWrites>) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData>; writes?: Parameters<typeof fakeWrites>[0] } = {}) {
+const OWN_A = '11111111-1111-4111-8111-111111111111';
+const OWN_B = '33333333-3333-4333-8333-333333333333';
+const OTHER_JOB = '22222222-2222-4222-8222-222222222222';
+
+async function withServer(fn: (url: string, logs: string[], calls: string[], w: ReturnType<typeof fakeWrites>, replays: string[][]) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData>; writes?: Parameters<typeof fakeWrites>[0]; dead?: { id: string; shop: string }[]; replayMoves?: number } = {}) {
+  const replays: string[][] = [];
   const logs: string[] = [];
   const w = fakeWrites(opts.writes);
   const { data, calls } = fakeData(opts.data);
   const handle = createEmbeddedHandler({
     clientId: ID, clientSecret: SECRET, now: () => NOW, data, actions: w.actions, audit: w.audit,
+    dead: { list: async () => opts.dead ?? [{ id: OWN_A, shop: SHOP }, { id: OTHER_JOB, shop: 'other-shop.myshopify.com' }, { id: OWN_B, shop: SHOP }], replay: async (ids) => { replays.push(ids); return opts.replayMoves ?? ids.length; } },
     knownShop: opts.known ?? (async (s) => s === SHOP),
     log: (_l, event, fields) => logs.push(`${event} ${JSON.stringify(fields ?? {})}`),
   });
@@ -77,7 +85,7 @@ async function withServer(fn: (url: string, logs: string[], calls: string[], w: 
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   try {
-    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, logs, calls, w);
+    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, logs, calls, w, replays);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
@@ -293,7 +301,7 @@ test('connection: stored for the TOKEN shop (a shop in the body is ignored), aud
     const r = await post(url, '/app/api/connection', { loginUrl: 'https://acme.my.salesforce.com', clientId: 'KEY-1', clientSecret: 'TOP-SECRET-VALUE', shop: 'other-shop.myshopify.com' });
     assert.equal(r.status, 200);
     const html = await r.text();
-    assert.ok(html.includes('Salesforce connection saved') && html.includes('client id: KEY-1'));
+    assert.ok(html.includes('Salesforce connection saved') && html.includes('client id: ••••') && !html.includes('KEY-1'), 'the key is masked');
     assert.ok(!html.includes('TOP-SECRET-VALUE'));
     assert.equal((await w.connections.get(SHOP))?.clientSecret, 'TOP-SECRET-VALUE');
     assert.equal(await w.connections.get('other-shop.myshopify.com'), null);
@@ -413,4 +421,128 @@ test('an oversized body with NO declared length (chunked) is refused at the cap,
     assert.equal(w.settings.size, 0, 'nothing was done with the oversized body');
     assert.deepEqual(w.audits, []);
   });
+});
+
+// ---- settings ----------------------------------------------------------------------------------------------------------------------------
+test('settings page: needs a token and shows the stored values for the TOKEN shop', async () => {
+  await withServer(async (url, _l, calls) => {
+    assert.equal((await fetch(`${url}/app/api/settings`)).status, 401);
+    const r = await fetch(`${url}/app/api/settings?shop=other-shop.myshopify.com`, { headers: bearer(token()) });
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.ok(html.includes('value="Stored"') && html.includes('<form data-post="/app/api/settings">'));
+    assert.deepEqual(calls.filter((c) => c.startsWith('settingsForm')), [`settingsForm ${SHOP}`]);
+  });
+});
+
+test('settings: a valid save is stored for the token shop, audited with the user, and does not change the mode', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    w.settings.set(`${SHOP}|R`, { enabled: true, dryRun: false, config: { minOrderTotal: '1' } });
+    const r = await post(url, '/app/api/settings', { minOrderTotal: '75', shop: 'other-shop.myshopify.com' });
+    assert.equal(r.status, 200);
+    assert.ok((await r.text()).includes('Settings saved.'));
+    assert.deepEqual(w.settings.get(`${SHOP}|R`), { enabled: true, dryRun: false, config: { bad: false, minOrderTotal: '75' } }, 'the mode is untouched');
+    assert.equal(w.settings.get('other-shop.myshopify.com|R'), undefined);
+    assert.deepEqual(w.audits, [{ action: 'config_saved', shop: SHOP, detail: 'user 42' }]);
+  });
+});
+
+test('settings: an invalid save is refused with 422, the problems and what was typed; nothing is stored or audited', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    w.actions.recipe.validate = () => { throw new ConfigValidationError(['minimum must be a number']); };
+    const r = await post(url, '/app/api/settings', { minOrderTotal: 'abc<img>', leadSource: 'Typed' });
+    assert.equal(r.status, 422);
+    const html = await r.text();
+    assert.ok(html.includes('minimum must be a number'), 'the problem is shown');
+    assert.ok(html.includes('value="abc&lt;img&gt;"'), 'what was typed is shown back, escaped');
+    assert.ok(html.includes('value="Typed"') && !html.includes('<img'));
+    assert.equal(w.settings.size, 0);
+    assert.deepEqual(w.audits, []);
+  });
+});
+
+test('settings: only GET and POST; the save needs the token, a form body and a small body', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const put = await fetch(`${url}/app/api/settings`, { method: 'PUT', headers: { ...bearer(token()), ...FORM }, body: '' });
+    assert.equal(put.status, 405);
+    assert.equal(put.headers.get('allow'), 'GET, POST');
+    assert.equal((await post(url, '/app/api/settings', { minOrderTotal: '1' }, FORM)).status, 401);
+    assert.equal((await fetch(`${url}/app/api/settings`, { method: 'POST', headers: { ...bearer(token()), 'Content-Type': 'application/json' }, body: '{}' })).status, 415);
+    assert.equal((await post(url, '/app/api/settings', { pad: 'x'.repeat(70_000) })).status, 413);
+    assert.equal(w.settings.size, 0);
+    assert.equal((await fetch(`${url}/app/api/log`, { method: 'POST', headers: { ...bearer(token()), ...FORM }, body: '' })).headers.get('allow'), 'GET');
+  });
+});
+
+// ---- failed jobs and replay ----------------------------------------------------------------------------------------------------------------
+test('failed jobs page: shows the token shop\'s jobs only', async () => {
+  const mine = [{ id: OWN_A, topic: 'orders/paid', businessKey: 'orders/paid|x|gid://shopify/Order/1', webhookId: 'w', deadAt: '2026-10-26T12:00:00Z' }];
+  const asked: string[] = [];
+  await withServer(async (url) => {
+    assert.equal((await fetch(`${url}/app/api/jobs`)).status, 401);
+    const html = await (await fetch(`${url}/app/api/jobs?shop=other-shop.myshopify.com`, { headers: bearer(token()) })).text();
+    assert.ok(html.includes(OWN_A) && html.includes('Replay all (1)'));
+    assert.deepEqual(asked, [SHOP], 'the jobs were asked for the token shop only');
+  }, { data: { jobs: async (shop) => { asked.push(shop); return shop === SHOP ? mine : []; } } });
+});
+
+test('replay: a shop can replay only its OWN jobs; another shop\'s job id and "all" never touch them', async () => {
+  await withServer(async (url, _l, _c, w, replays) => {
+    const one = await post(url, '/app/api/replay', { id: OWN_A });
+    assert.equal(one.status, 200);
+    assert.ok((await one.text()).includes('Jobs moved back to the queue'));
+    const foreign = await post(url, '/app/api/replay', { id: OTHER_JOB });
+    assert.equal(foreign.status, 200);
+    assert.ok((await foreign.text()).includes('Nothing to replay.'));
+    await post(url, '/app/api/replay', { id: 'all' });
+    assert.deepEqual(replays, [[OWN_A], [OWN_A, OWN_B]], "never the other shop's job, and the foreign id replayed nothing");
+    assert.deepEqual(w.audits.map((a) => [a.action, a.detail]), [['replay', 'jobs=1 · user 42'], ['replay', 'jobs=2 · user 42']], 'only real replays are audited');
+  });
+});
+
+test('replay: unknown ids, non-ids and extra fields are refused; nothing replayed or audited; no token means no replay', async () => {
+  await withServer(async (url, _l, _c, w, replays) => {
+    for (const body of [{}, { id: '' }, { id: 'ALL' }, { id: 'a' }, { id: `${OWN_A},${OWN_B}` }, { id: "'; drop" }]) {
+      const r = await post(url, '/app/api/replay', body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.ok((await r.text()).includes('That request was not understood.'));
+    }
+    assert.equal((await post(url, '/app/api/replay', { id: 'all' }, FORM)).status, 401);
+    assert.equal((await fetch(`${url}/app/api/replay`, { headers: bearer(token()) })).status, 405);
+    assert.deepEqual(replays, []);
+    assert.deepEqual(w.audits, []);
+  });
+});
+
+test('replay: with no failed jobs it says so and writes nothing; a replay that moves none is not audited', async () => {
+  await withServer(async (url, _l, _c, w, replays) => {
+    const r = await post(url, '/app/api/replay', { id: 'all' });
+    assert.ok((await r.text()).includes('Nothing to replay.'));
+    assert.deepEqual([replays, w.audits], [[], []]);
+  }, { dead: [] });
+  await withServer(async (url, _l, _c, w) => {
+    const r = await post(url, '/app/api/replay', { id: OWN_A });
+    assert.ok((await r.text()).includes('Nothing to replay.'));
+    assert.deepEqual(w.audits, []);
+  }, { replayMoves: 0 });
+});
+
+test('writes for a shop the operator has not set up are refused for settings and replay too', async () => {
+  await withServer(async (url, _l, _c, w, replays) => {
+    assert.equal((await post(url, '/app/api/settings', { minOrderTotal: '1' })).status, 403);
+    assert.equal((await post(url, '/app/api/replay', { id: 'all' })).status, 403);
+    assert.equal(w.settings.size, 0);
+    assert.deepEqual(replays, []);
+  }, { known: async () => false });
+});
+
+test("the failed-jobs list is this shop's jobs only, with look-alike shop names kept apart, and carries no payload", () => {
+  const j = (id: string, shop: string) => ({ id, shop, topic: 'orders/paid', businessKey: `k-${id}`, webhookId: `w-${id}`, deadAt: '2026-10-26T12:00:00Z', payload: 'CUSTOMER DATA', data: { email: 'x@y.z' } });
+  const all = [j('a', SHOP), j('b', 'other-shop.myshopify.com'), j('c', `${SHOP}.evil.io`), j('d', `x${SHOP}`), j('e', SHOP)];
+  const mine = jobsFor(all as any, SHOP);
+  assert.deepEqual(mine.map((x) => x.id), ['a', 'e']);
+  assert.deepEqual(Object.keys(mine[0]).sort(), ['businessKey', 'deadAt', 'id', 'topic', 'webhookId']);
+  assert.ok(!JSON.stringify(mine).includes('CUSTOMER DATA') && !JSON.stringify(mine).includes('x@y.z'));
+  assert.deepEqual(failedJobsFor(all as any, SHOP), 2);
+  assert.deepEqual(jobsFor([], SHOP), []);
 });

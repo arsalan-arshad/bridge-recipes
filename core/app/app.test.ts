@@ -13,6 +13,7 @@ import { createApp } from './app.ts';
 import { makeLogger } from './logger.ts';
 import { DEFAULT_RETENTION } from '../queue/retention.ts';
 import { PostgresConnectionStore } from '../queue/postgresConnectionStore.ts';
+import { configToForm } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
 import { R1_DEFAULT_CONFIG, R1_ID } from '../../recipes/retail-b2b-lead-spotter/recipe.ts';
 import type { AppConfig } from './env.ts';
 
@@ -601,6 +602,24 @@ test('embedded writes end to end: connect, test, dry-run, go-live refused, kill 
     assert.ok(verified.includes('The Salesforce connection works.'), verified.slice(0, 300));
     assert.equal((await call(NEWSHOP, 'recipe', { action: 'enable_dry' })).status, 200);
     assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true]);
+    // settings: the same validation as the operator page, stored for this shop only, mode untouched, audited with the user
+    const form = configToForm(R1_DEFAULT_CONFIG);
+    const body = (over: Record<string, string>): Record<string, string> => ({ ...Object.fromEntries(Object.entries(form).filter(([, v]) => v !== false).map(([k, v]) => [k, v === true ? 'on' : String(v)])), ...over });
+    const saved2 = await call(NEWSHOP, 'settings', body({ leadSource: 'Embedded Test Source' }));
+    assert.equal(saved2.status, 200);
+    assert.equal((await app.stores.configs.get(NEWSHOP, R1_ID))?.config.leadSource, 'Embedded Test Source');
+    assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true], 'saving settings left the mode alone');
+    const refused = await call(NEWSHOP, 'settings', body({ minOrderTotal: 'not-a-number' }));
+    assert.equal(refused.status, 422);
+    assert.equal((await app.stores.configs.get(NEWSHOP, R1_ID))?.config.leadSource, 'Embedded Test Source', 'a refused save changed nothing');
+    assert.equal((await app.stores.configs.get(SHOP, R1_ID)), null, 'the other shop was not touched');
+    const page = await (await fetch(`${url}/app/api/settings`, { headers: { Authorization: `Bearer ${tok(NEWSHOP)}` } })).text();
+    assert.ok(page.includes('value="Embedded Test Source"'));
+    const jobsPage = await fetch(`${url}/app/api/jobs`, { headers: { Authorization: `Bearer ${tok(NEWSHOP)}` } });
+    assert.equal(jobsPage.status, 200);
+    assert.ok((await jobsPage.text()).includes('No failed jobs.'));
+    assert.equal((await call(NEWSHOP, 'replay', { id: 'all' })).status, 200, 'replay with nothing failed is a harmless no-op');
+
     // going LIVE is not possible from the embedded page, with or without the word and a stored connection
     for (const confirm of ['live', 'LIVE']) assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm })).status, 403);
     assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true], 'still dry-run');
@@ -615,7 +634,7 @@ test('embedded writes end to end: connect, test, dry-run, go-live refused, kill 
       const s_fail_detail = (all: any[]) => { const d = String(all.find((r) => r.action === 'connection_failed')?.detail ?? ''); assert.match(d, / · user staff-7$/); return d; };
       assert.deepEqual(rows.map((r) => [r.action, r.shop, r.detail]), [
         ['connection_saved', NEWSHOP, 'user staff-7'], ['connection_failed', NEWSHOP, s_fail_detail(rows)], ['connection_saved', NEWSHOP, 'user staff-7'],
-        ['connection_verified', NEWSHOP, 'user staff-7'], ['recipe_dry_run', NEWSHOP, 'user staff-7'],
+        ['connection_verified', NEWSHOP, 'user staff-7'], ['recipe_dry_run', NEWSHOP, 'user staff-7'], ['config_saved', NEWSHOP, 'user staff-7'],
         ['recipe_disabled', NEWSHOP, 'user staff-7'],
       ]);
       const raw = JSON.stringify((await p.query(`SELECT * FROM ${schema}.salesforce_connection WHERE shop = $1`, [NEWSHOP])).rows);

@@ -6,6 +6,8 @@
 //   GET /app/api/home        HTML fragment (setup status + latest decisions), needs `Authorization: Bearer <ID token>`
 //   GET /app/api/log         HTML fragment (decision log, ?outcome= & ?page=), same auth
 //   GET /app/api/setup       HTML fragment (Salesforce connection and recipe controls)
+//   GET /app/api/settings    HTML fragment (the recipe's settings form); POST /app/api/settings saves it
+//   GET /app/api/jobs        HTML fragment (this shop's failed jobs); POST /app/api/replay replays them (own jobs only)
 //   POST /app/api/connection | /verify | /recipe   the write actions (core/admin/actions.ts), form-encoded body, same auth.
 //                            Going LIVE is deliberately NOT available here (owner decision 2026-10-27): a `go_live` request is refused with
 //                            403 and nothing is written; it needs the operator password on /admin.
@@ -19,10 +21,11 @@ import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { esc } from '../admin/html.ts';
 import { FormError, MAX_FORM_BYTES, parseForm } from '../admin/forms.ts';
-import { recipeAction, saveConnection, verifyConnection } from '../admin/actions.ts';
+import { recipeAction, saveConfig, saveConnection, verifyConnection } from '../admin/actions.ts';
 import type { ActionDeps, ActionOutcome } from '../admin/actions.ts';
-import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, logFragment, setupFragment } from './pages.ts';
-import type { HomeData, SetupData } from './pages.ts';
+import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, jobsFragment, logFragment, settingsFragment, setupFragment } from './pages.ts';
+import type { HomeData, JobView, SetupData } from './pages.ts';
+import { selectReplayIds } from './replay.ts';
 import { SHOP_PATTERN, verifySessionToken } from './token.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
@@ -38,11 +41,18 @@ export interface EmbeddedData {
   summary(shop: string): Promise<Pick<HomeData, 'connection' | 'recipe'>>;
   recent(f: { shop: string; outcome?: string; limit: number; offset: number }): Promise<LogEntry[]>;
   failedJobs(shop: string): Promise<number>;
+  jobs(shop: string): Promise<JobView[]>; // this shop's failed jobs only
+  settingsForm(shop: string): Promise<Record<string, string | boolean>>; // the stored settings as form values
 }
 
 // Failed jobs are listed for every shop; each shop's page counts only its own.
 export function failedJobsFor(jobs: { shop: string }[], shop: string): number {
   return jobs.filter((j) => j.shop === shop).length;
+}
+
+// The failed-jobs page shows this shop's jobs only, and only the fields it needs (never a payload).
+export function jobsFor(jobs: { id: string; shop: string; topic: string; businessKey: string; webhookId: string; deadAt: string }[], shop: string): JobView[] {
+  return jobs.filter((j) => j.shop === shop).map(({ id, topic, businessKey, webhookId, deadAt }) => ({ id, topic, businessKey, webhookId, deadAt }));
 }
 
 export interface EmbeddedDeps {
@@ -52,6 +62,7 @@ export interface EmbeddedDeps {
   data: EmbeddedData;
   actions: ActionDeps; // the shared write actions
   audit: { record(e: { action: string; shop?: string; detail?: string }): Promise<void> };
+  dead: { list(): Promise<{ id: string; shop: string }[]>; replay(ids: string[]): Promise<number> }; // all shops' failed jobs; the handler narrows to the token's shop
   now: () => number;
   log?: (level: 'info' | 'error', event: string, fields?: Record<string, unknown>) => void;
 }
@@ -83,11 +94,13 @@ function shell(clientId: string): string {
 <script src="/app/assets/app.js"></script></body></html>`;
 }
 
-type Route = 'home' | 'log' | 'setup' | 'connection' | 'verify' | 'recipe';
-const READS = new Set<string>(['home', 'log', 'setup']);
-const ROUTES: Record<string, Route> = {
-  '/app/api/home': 'home', '/app/api/log': 'log', '/app/api/setup': 'setup',
-  '/app/api/connection': 'connection', '/app/api/verify': 'verify', '/app/api/recipe': 'recipe',
+type Route = 'home' | 'log' | 'setup' | 'settings' | 'jobs' | 'connection' | 'verify' | 'recipe' | 'settings_save' | 'replay';
+const READS = new Set<string>(['home', 'log', 'setup', 'settings', 'jobs']);
+// path -> the route for each allowed method; any other method is 405 with Allow listing these
+const ROUTES: Record<string, { GET?: Route; POST?: Route }> = {
+  '/app/api/home': { GET: 'home' }, '/app/api/log': { GET: 'log' }, '/app/api/setup': { GET: 'setup' }, '/app/api/jobs': { GET: 'jobs' },
+  '/app/api/settings': { GET: 'settings', POST: 'settings_save' },
+  '/app/api/connection': { POST: 'connection' }, '/app/api/verify': { POST: 'verify' }, '/app/api/recipe': { POST: 'recipe' }, '/app/api/replay': { POST: 'replay' },
 };
 
 class HttpError extends Error {
@@ -133,6 +146,8 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
       return homeFragment({ shop, ...summary, recent, failedJobs });
     }
     if (route === 'setup') return setupFragment(await setupData(shop));
+    if (route === 'settings') return settingsFragment({ shop, form: await deps.data.settingsForm(shop) });
+    if (route === 'jobs') return jobsFragment({ shop, jobs: await deps.data.jobs(shop) });
     const asked = query.get('outcome') ?? '';
     const outcome = LOG_OUTCOMES.includes(asked) ? asked : ''; // anything else means "all"
     const n = Number(query.get('page') ?? '1');
@@ -142,6 +157,35 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
   }
 
   // Runs a write action for the token's shop, records it (with the Shopify user), and shows the setup page with the result.
+  async function record(shop: string, userId: string | null, audit: { action: string; detail?: string }): Promise<void> {
+    const detail = [audit.detail, userId ? `user ${userId}` : null].filter(Boolean).join(' · ') || undefined;
+    try {
+      await deps.audit.record({ action: audit.action, shop, detail });
+    } catch {
+      deps.log?.('error', 'embedded_audit_failed', { action: audit.action });
+    }
+  }
+
+  // Replay: only the token's shop's own failed jobs, whatever id the request names.
+  async function replay(shop: string, userId: string | null, form: Map<string, string>): Promise<{ status: number; html: string }> {
+    const sel = selectReplayIds(await deps.dead.list(), shop, form.get('id'));
+    if (!sel.ok) return { status: 400, html: jobsFragment({ shop, jobs: await deps.data.jobs(shop), errors: ['That request was not understood.'] }) };
+    if (sel.ids.length === 0) return { status: 200, html: jobsFragment({ shop, jobs: await deps.data.jobs(shop), msg: 'nothing_to_replay' }) };
+    const moved = await deps.dead.replay(sel.ids);
+    if (moved > 0) await record(shop, userId, { action: 'replay', detail: `jobs=${moved}` }); // a replay that moved nothing changed nothing
+    return { status: 200, html: jobsFragment({ shop, jobs: await deps.data.jobs(shop), msg: moved > 0 ? 'replayed' : 'nothing_to_replay' }) };
+  }
+
+  async function saveSettings(shop: string, userId: string | null, form: Map<string, string>): Promise<{ status: number; html: string }> {
+    const outcome = await saveConfig(deps.actions, shop, form);
+    if (outcome.ok) {
+      await record(shop, userId, outcome.audit);
+      return { status: 200, html: settingsFragment({ shop, form: await deps.data.settingsForm(shop), msg: outcome.msg }) };
+    }
+    if (outcome.kind === 'settings') return { status: outcome.status, html: settingsFragment({ shop, form: outcome.echo ?? (await deps.data.settingsForm(shop)), errors: outcome.errors }) };
+    return { status: 400, html: settingsFragment({ shop, form: await deps.data.settingsForm(shop), errors: ['That request was not understood.'] }) };
+  }
+
   async function act(route: 'connection' | 'verify' | 'recipe', shop: string, userId: string | null, form: Map<string, string>): Promise<{ status: number; html: string }> {
     if (route === 'recipe' && form.get('action') === 'go_live') {
       deps.log?.('info', 'embedded_go_live_refused', { shop });
@@ -150,14 +194,7 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
     const outcome: ActionOutcome = route === 'connection' ? await saveConnection(deps.actions, shop, form)
       : route === 'verify' ? await verifyConnection(deps.actions, shop) : await recipeAction(deps.actions, shop, form);
     const audit = ('audit' in outcome ? outcome.audit : undefined);
-    if (audit) {
-      const detail = [audit.detail, userId ? `user ${userId}` : null].filter(Boolean).join(' · ') || undefined;
-      try {
-        await deps.audit.record({ action: audit.action, shop, detail });
-      } catch {
-        deps.log?.('error', 'embedded_audit_failed', { action: audit.action });
-      }
-    }
+    if (audit) await record(shop, userId, audit);
     if (outcome.ok) return { status: 200, html: setupFragment(await setupData(shop, { msg: outcome.msg })) };
     if (outcome.kind === 'bad_request') return { status: 400, html: setupFragment(await setupData(shop, { errors: ['That action is not recognised.'] })) };
     if (outcome.kind === 'connection') return { status: outcome.status, html: setupFragment(await setupData(shop, { connError: outcome.message })) };
@@ -186,7 +223,9 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
     try {
       if (READS.has(route)) return fragment(res, 200, await render(route, verdict.shop, query));
       const form = await readForm(req);
-      const out = await act(route as 'connection' | 'verify' | 'recipe', verdict.shop, verdict.userId, form);
+      const out = route === 'settings_save' ? await saveSettings(verdict.shop, verdict.userId, form)
+        : route === 'replay' ? await replay(verdict.shop, verdict.userId, form)
+          : await act(route as 'connection' | 'verify' | 'recipe', verdict.shop, verdict.userId, form);
       return fragment(res, out.status, out.html);
     } catch (e) {
       if (e instanceof HttpError) return text(res, e.status, 'rejected');
@@ -200,12 +239,14 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
     const path = url.pathname;
     if (path !== '/app' && !path.startsWith('/app/')) return false;
 
-    const route = Object.hasOwn(ROUTES, path) ? ROUTES[path] : undefined;
-    const allowed = route === undefined ? 'GET' : READS.has(route) ? 'GET' : 'POST';
-    if (req.method !== allowed) {
-      res.writeHead(405, { ...BASE_HEADERS, Allow: allowed }).end();
+    const entry = Object.hasOwn(ROUTES, path) ? ROUTES[path] : undefined;
+    const allowed = entry === undefined ? ['GET'] : Object.keys(entry);
+    const method = req.method ?? '';
+    if (!allowed.includes(method)) {
+      res.writeHead(405, { ...BASE_HEADERS, Allow: allowed.join(', ') }).end();
       return true;
     }
+    const route = entry === undefined ? undefined : entry[method as 'GET' | 'POST'];
     if (path === '/app') {
       const shop = (url.searchParams.get('shop') ?? '').toLowerCase();
       // the shop goes into a response header (frame-ancestors): accept only a plain myshopify.com host, nothing else

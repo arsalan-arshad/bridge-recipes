@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { homeFragment, logFragment, logPath, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
-import type { HomeData, SetupData } from './pages.ts';
+import { homeFragment, jobsFragment, logFragment, logPath, maskKey, settingsFragment, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
+import type { HomeData, JobsData, SetupData, SettingsData } from './pages.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
 const entry = (over: Partial<LogEntry> = {}): LogEntry => ({
@@ -73,7 +73,7 @@ test('navigation: every data-view is one of our /app/api/ paths and nothing else
   const html = homeFragment(home()) + logFragment({ shop: 's', outcome: 'failed', page: 3, entries: [entry()], hasNext: true });
   const views = [...html.matchAll(/data-view="([^"]*)"/g)].map((m) => m[1].replaceAll('&amp;', '&')); // the browser decodes &amp; in attributes
   assert.ok(views.length > 10);
-  for (const v of views) assert.match(v, /^\/app\/api\/(home|log|setup)(\?[a-z_=&0-9]*)?$/, v);
+  for (const v of views) assert.match(v, /^\/app\/api\/(home|log|setup|settings|jobs)(\?[a-z_=&0-9]*)?$/, v);
   assert.ok(!/href="(?!\/admin")/.test(html), 'the only href is the operator admin link');
   assert.ok(html.includes('<s-link href="/admin" target="_blank">'), 'the operator page opens in a new tab (it cannot be framed)');
 });
@@ -112,7 +112,7 @@ test('setup: the forms post only to our write routes, and the secret field is a 
   assert.deepEqual(posts, ['/app/api/connection', '/app/api/verify', '/app/api/recipe', '/app/api/recipe']);
   assert.ok(html.includes('<s-password-field label="Consumer secret" name="clientSecret" autocomplete="off"></s-password-field>'));
   assert.ok(!/<s-password-field[^>]*value=/.test(html), 'no value attribute on the secret field');
-  assert.ok(html.includes('Org: https://acme.my.salesforce.com · client id: KEY123'));
+  assert.ok(html.includes('Org: https://acme.my.salesforce.com · client id: ••••') && !html.includes('KEY123'), 'a short key is fully masked');
   assert.ok(html.includes('Replace connection') && html.includes('Test connection'));
   assert.ok(html.includes('<s-badge tone="success">stored (encrypted)</s-badge>') && !html.includes('<s-badge tone="caution">not set</s-badge>'));
   const fresh = setupFragment(setup());
@@ -143,4 +143,73 @@ test('setup: notices come from a fixed list; unknown codes show nothing; problem
 
 test('home links to the setup page', () => {
   assert.ok(homeFragment(home()).includes('<s-button variant="primary" data-view="/app/api/setup">'));
+});
+
+test('the consumer key is shown masked: only the last four of a long one, nothing of a short one', () => {
+  assert.equal(maskKey('FAKEKEY-abcdefghijkl-WXYZ'), '…WXYZ');
+  assert.equal(maskKey('abcdefghi'), '…fghi');
+  for (const short of ['', 'a', 'abcdefgh']) assert.equal(maskKey(short), '••••', JSON.stringify(short));
+  const key = 'FAKEKEY-abcdefghijkl.SECRETISH-REST';
+  const html = setupFragment(setup({ connection: { stored: true, lastVerifiedAt: null, loginUrl: 'https://a.my.salesforce.com', clientId: key } }));
+  assert.ok(html.includes('client id: …REST') && !html.includes('FAKEKEY') && !html.includes('SECRETISH'));
+  assert.ok(!setupFragment(setup({ connection: { stored: true, lastVerifiedAt: null, clientId: HOSTILE + 'abcdefgh' } })).includes('<img'));
+});
+
+const settings = (over: Partial<SettingsData> = {}): SettingsData => ({
+  shop: 's.myshopify.com',
+  form: { leadSource: 'Shopify Order', minOrderTotal: '50', requireConsent: true, existingLeadAction: 'update', companyOverride: '', leadOwnerId: '', allowDomains: 'a.com\nb.com', denyDomains: '', freeEmailBlocklist: 'gmail.com' },
+  ...over,
+});
+
+test('settings: every field is present with its stored value, the form posts to the save route, and the mode is not part of it', () => {
+  const html = settingsFragment(settings());
+  assert.ok(html.includes('<form data-post="/app/api/settings">'));
+  for (const n of ['leadSource', 'minOrderTotal', 'requireConsent', 'existingLeadAction', 'companyOverride', 'leadOwnerId', 'allowDomains', 'denyDomains', 'freeEmailBlocklist']) assert.ok(html.includes(`name="${n}"`), n);
+  assert.ok(html.includes('name="leadSource" autocomplete="off" value="Shopify Order"') && html.includes('name="minOrderTotal" autocomplete="off" value="50"'));
+  assert.ok(html.includes('name="requireConsent" checked></s-checkbox>'), 'consent on');
+  assert.ok(settingsFragment(settings({ form: { ...settings().form, requireConsent: false } })).includes('name="requireConsent"></s-checkbox>'), 'consent off: no checked attribute');
+  assert.ok(html.includes('name="existingLeadAction" value="update"'));
+  assert.ok(settingsFragment(settings({ form: { ...settings().form, existingLeadAction: 'skip' } })).includes('name="existingLeadAction" value="skip"'));
+  assert.ok(settingsFragment(settings({ form: { ...settings().form, existingLeadAction: '<img>' } })).includes('name="existingLeadAction" value="update"'), 'an unknown value falls back to update');
+  assert.ok(!html.includes('name="action"') && !html.includes('go_live') && !html.includes('enable_dry'), 'no mode controls here');
+  assert.ok(html.includes('Saving settings never changes whether the recipe is on or live.'));
+});
+
+test('settings: values and problems are escaped; notices come from the fixed list', () => {
+  const form = { ...settings().form, leadSource: HOSTILE, allowDomains: HOSTILE, companyOverride: HOSTILE };
+  const html = settingsFragment(settings({ form, errors: [HOSTILE], msg: 'config_saved' }));
+  assert.ok(!html.includes('<img') && html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(html.includes('heading="Settings not saved"') && html.includes('<s-banner tone="success">Settings saved.</s-banner>'));
+  for (const code of ['__proto__', 'constructor']) assert.ok(!settingsFragment(settings({ msg: code })).includes('<s-banner'), code);
+  assert.ok(!settingsFragment(settings({ form: {} })).includes('undefined'), 'missing values are empty, not "undefined"');
+});
+
+const jobs = (over: Partial<JobsData> = {}): JobsData => ({
+  shop: 's.myshopify.com',
+  jobs: [{ id: '11111111-1111-4111-8111-111111111111', topic: 'orders/paid', businessKey: 'orders/paid|s.myshopify.com|gid://shopify/Order/9', webhookId: 'w9', deadAt: '2026-10-26T12:00:00Z' }],
+  ...over,
+});
+
+test('failed jobs: one row per job with a replay form for that id, replay all with the count, and an empty state', () => {
+  const html = jobsFragment(jobs());
+  assert.ok(html.includes('<input type="hidden" name="id" value="11111111-1111-4111-8111-111111111111">') && html.includes('Replay all (1)'));
+  assert.ok(html.includes('<input type="hidden" name="id" value="all">'));
+  assert.deepEqual([...html.matchAll(/<form data-post="([^"]*)"/g)].map((m) => m[1]), ['/app/api/replay', '/app/api/replay']);
+  assert.ok(html.includes("You can only replay this store's jobs."));
+  const none = jobsFragment(jobs({ jobs: [] }));
+  assert.ok(none.includes('No failed jobs.') && !none.includes('<form') && !none.includes('Replay all') && !none.includes('<s-table>'));
+  assert.ok(!html.includes('webhookId') && !html.includes('w9'), 'no payload or extra ids');
+});
+
+test('failed jobs: everything dynamic is escaped; notices are fixed', () => {
+  const html = jobsFragment(jobs({ jobs: [{ id: HOSTILE, topic: HOSTILE, businessKey: HOSTILE, webhookId: HOSTILE, deadAt: HOSTILE }], errors: [HOSTILE], msg: 'replayed' }));
+  assert.ok(!html.includes('<img') && html.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(html.includes('Jobs moved back to the queue'));
+  assert.ok(jobsFragment(jobs({ msg: 'nothing_to_replay' })).includes('Nothing to replay.'));
+});
+
+test('home: shows a failed-jobs button with the count, and links to settings', () => {
+  assert.ok(homeFragment(home({ failedJobs: 3 })).includes('data-view="/app/api/jobs">Failed jobs (3)</s-button>'));
+  assert.ok(homeFragment(home({ failedJobs: 0 })).includes('data-view="/app/api/jobs">Failed jobs</s-button>'));
+  assert.ok(homeFragment(home()).includes('data-view="/app/api/settings">Recipe settings</s-button>'));
 });
