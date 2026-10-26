@@ -63,18 +63,38 @@ const job = (over: Partial<Job> = {}): Job => ({
   businessKey: 'orders/paid|s.myshopify.com|1', receivedAt: '2026-10-19T12:00:00.000Z', payload: '{"a":1}', ...over,
 });
 
+// Counts ONLY this test's own connections: they carry a unique application_name. (Counting every connection to the database is
+// racy: Node runs the other test files at the same time against the same database.)
+// (URL below is the connection string, so the built-in class is reached through globalThis)
+const tagged = (tag: string) => { const u = new globalThis.URL(URL); u.searchParams.set('application_name', tag); return u.toString(); };
+const tagCount = async (probe: pg.Pool, tag: string) => (await probe.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`, [tag])).rows[0].n as number;
+
 test('a failed start does not leak connections', { skip }, async () => {
   const probe = new pg.Pool({ connectionString: URL, max: 1 });
-  const open = async () => (await probe.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`)).rows[0].n as number;
-  const before = await open();
-  const schema = newSchema();
-  const bad: RetryPolicy = { ...FAST, retryLimit: -1 }; // pg-boss rejects this when the queue is created
-  await assert.rejects(() => startQueue({ connectionString: URL, schema, policy: bad }));
-  await sleep(500);
-  const after = await open();
-  await dropSchema(schema);
-  await probe.end();
-  assert.ok(after <= before, `connections before=${before} after=${after}`);
+  try {
+    // sanity: the tag really reaches the connections a healthy queue opens, so a zero below cannot be vacuous
+    const tagA = `leak_ok_${randomBytes(4).toString('hex')}`;
+    const schemaA = newSchema();
+    const rt = await startQueue({ connectionString: tagged(tagA), schema: schemaA, policy: FAST });
+    assert.ok((await tagCount(probe, tagA)) > 0, 'a running queue shows connections under its tag');
+    await rt.stop();
+    await dropSchema(schemaA);
+
+    const tagB = `leak_bad_${randomBytes(4).toString('hex')}`;
+    const schema = newSchema();
+    const bad: RetryPolicy = { ...FAST, retryLimit: -1 }; // pg-boss rejects this when the queue is created
+    await assert.rejects(() => startQueue({ connectionString: tagged(tagB), schema, policy: bad }));
+    let left = -1;
+    for (let i = 0; i < 20; i++) { // closing is asynchronous: wait for it, up to 4 s
+      left = await tagCount(probe, tagB);
+      if (left === 0) break;
+      await sleep(200);
+    }
+    await dropSchema(schema);
+    assert.equal(left, 0, `connections still open under the failed start's tag: ${left}`);
+  } finally {
+    await probe.end();
+  }
 });
 
 test('atomic: if enqueueing fails nothing is recorded, so the retry is accepted (not lost as a "duplicate")', { skip }, async () => {
