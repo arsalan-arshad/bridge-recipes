@@ -27,6 +27,7 @@ export interface AppConfig {
   shutdownTimeoutMs: number;
   trustProxy: boolean; // TRUSTED_PROXY=true: a reverse proxy we control sets X-Forwarded-For/Proto
   adminPassword: string | null; // null = the admin UI is switched off (its routes do not exist)
+  apiKey: string | null; // the Shopify app's client id (public); null = the embedded /app surface is switched off
 }
 
 function int(env: Record<string, string | undefined>, name: string, def: number, min: number, max: number, problems: string[]): number {
@@ -71,6 +72,8 @@ export function loadEnv(env: Record<string, string | undefined> = process.env): 
   };
   const adminPassword = env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD : null;
   if (adminPassword !== null && adminPassword.length < 12) problems.push('ADMIN_PASSWORD must be at least 12 characters (or unset it to switch the admin UI off)');
+  const apiKey = env.SHOPIFY_API_KEY ? env.SHOPIFY_API_KEY : null;
+  if (apiKey !== null && !/^[A-Za-z0-9_-]{8,128}$/.test(apiKey)) problems.push('SHOPIFY_API_KEY must be the app client id (letters, digits, - and _), or unset it to switch the embedded app page off');
   const config: AppConfig = {
     databaseUrl, schema, webhookSecret, encryptionKey,
     host: env.HOST || '0.0.0.0',
@@ -79,7 +82,7 @@ export function loadEnv(env: Record<string, string | undefined> = process.env): 
     purgeEveryMinutes: int(env, 'PURGE_EVERY_MINUTES', 360, 1, 10080, problems),
     pollingSeconds: int(env, 'WORKER_POLL_SECONDS', 2, 1, 60, problems),
     shutdownTimeoutMs: int(env, 'SHUTDOWN_TIMEOUT_SECONDS', 20, 1, 300, problems) * 1000,
-    adminPassword,
+    adminPassword, apiKey,
     trustProxy: /^(1|true|yes)$/i.test(env.TRUSTED_PROXY ?? ''),
   };
   if (problems.length > 0) throw new ConfigError(problems);
