@@ -74,6 +74,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
     });
 
     const dead = createDeadLetters(rt.boss);
+    const audit = new PostgresAudit(rt.pool, config.schema, now);
 
     // The operator admin UI exists only when ADMIN_PASSWORD is set; otherwise /admin falls through to the 404 below.
     const admin = config.adminPassword === null ? null : createAdminHandler({
@@ -86,7 +87,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       shops: () => listShops(rt.pool, config.schema),
       verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }),
       dead,
-      audit: new PostgresAudit(rt.pool, config.schema, now),
+      audit,
       compliance: new PostgresComplianceLog(rt.pool, config.schema),
       log,
     });
@@ -101,13 +102,15 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
         summary: async (shop) => {
           const [settings, conn] = await Promise.all([configs.get(shop, R1_ID), connections.info(shop)]);
           return {
-            connection: { stored: conn.stored, lastVerifiedAt: conn.lastVerifiedAt },
+            connection: { stored: conn.stored, lastVerifiedAt: conn.lastVerifiedAt, loginUrl: conn.loginUrl, clientId: conn.clientId },
             recipe: { name: 'Retail-to-B2B Lead Spotter', configured: settings !== null, enabled: settings?.enabled === true, dryRun: settings?.dryRun !== false },
           };
         },
         recent: (f) => syncLog.recent(f),
         failedJobs: async (shop) => failedJobsFor(await dead.list(), shop),
       },
+      actions: { recipe: { id: R1_ID, defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, fromForm: formToConfig }, connections, configs, verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }) },
+      audit,
       now: () => now().getTime(),
       log,
     });
