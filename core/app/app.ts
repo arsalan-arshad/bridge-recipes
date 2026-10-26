@@ -4,6 +4,7 @@
 //   POST /webhooks/shopify   signed Shopify webhooks (raw-body HMAC first)
 //   GET  /healthz            liveness: the process is up (no dependencies checked)
 //   GET  /readyz             readiness: database reachable and not shutting down (503 otherwise)
+//   /app                     the embedded Shopify admin page, only when SHOPIFY_API_KEY is set (core/embedded/)
 // Health responses carry no data about shops, customers or configuration.
 
 import { createServer } from 'node:http';
@@ -21,6 +22,7 @@ import { createAdminHandler } from '../admin/handler.ts';
 import { handleLifecycleJob } from '../compliance/handlers.ts';
 import { LIFECYCLE_TOPICS } from '../compliance/topics.ts';
 import { deriveSessionKey } from '../admin/security.ts';
+import { createEmbeddedHandler } from '../embedded/handler.ts';
 import { PostgresAudit, PostgresComplianceLog, createDeadLetters, listShops } from '../queue/postgresAdminData.ts';
 import { verifyShop } from './admin.ts';
 import { configToForm, formToConfig } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
@@ -87,8 +89,18 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       log,
     });
 
+    // The embedded Shopify admin page exists only when SHOPIFY_API_KEY is set. Only shops the operator already knows may use it.
+    const embedded = config.apiKey === null ? null : createEmbeddedHandler({
+      clientId: config.apiKey,
+      clientSecret: config.webhookSecret,
+      knownShop: async (shop) => (await listShops(rt.pool, config.schema)).includes(shop),
+      now: () => now().getTime(),
+      log,
+    });
+
     server = createServer((req, res) => {
       if (admin && admin(req, res)) return;
+      if (embedded && embedded(req, res)) return;
       if (req.method === 'GET' && req.url === '/healthz') {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"status":"ok"}');
         return;

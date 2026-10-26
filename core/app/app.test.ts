@@ -68,7 +68,7 @@ async function fakeSalesforce(opts: { createDelayMs?: number } = {}) {
 // ---- the app under test ----------------------------------------------------------------------------------
 async function withApp(
   fn: (c: { app: Awaited<ReturnType<typeof createApp>>; sf: Awaited<ReturnType<typeof fakeSalesforce>>; url: string; lines: string[]; schema: string; key: Buffer; deliver: (o?: { order?: number; shop?: string; webhookId?: string; sign?: string }) => Promise<number> }) => Promise<void>,
-  opts: { createDelayMs?: number; purgeEveryMs?: number; stopAfter?: boolean; adminPassword?: string } = {},
+  opts: { createDelayMs?: number; purgeEveryMs?: number; stopAfter?: boolean; adminPassword?: string; apiKey?: string } = {},
 ) {
   const sf = await fakeSalesforce({ createDelayMs: opts.createDelayMs });
   const schema = `bridge_t_${randomBytes(4).toString('hex')}`;
@@ -76,7 +76,7 @@ async function withApp(
   const key = randomBytes(32);
   const config: AppConfig = {
     databaseUrl: URL, schema, webhookSecret: SIGNING, encryptionKey: key, host: '127.0.0.1', port: 0,
-    retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 5000, adminPassword: opts.adminPassword ?? null,
+    retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 5000, adminPassword: opts.adminPassword ?? null, apiKey: opts.apiKey ?? null, trustProxy: false,
   };
   const app = await createApp(config, { log: makeLogger((l) => lines.push(l)), purgeEveryMs: opts.purgeEveryMs });
   const url = `http://127.0.0.1:${app.port}`;
@@ -267,7 +267,7 @@ test('a failed start (port already in use) rejects and leaks no database connect
     const probe = new pg.Pool({ connectionString: URL, max: 1 });
     const count = async () => (await probe.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`, [tag])).rows[0].n as number;
     const schema2 = `bridge_t_${randomBytes(4).toString('hex')}`;
-    const cfg: AppConfig = { databaseUrl: tagged.toString(), schema: schema2, webhookSecret: SIGNING, encryptionKey: randomBytes(32), host: '127.0.0.1', port: app.port, retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 3000, adminPassword: null, trustProxy: false };
+    const cfg: AppConfig = { databaseUrl: tagged.toString(), schema: schema2, webhookSecret: SIGNING, encryptionKey: randomBytes(32), host: '127.0.0.1', port: app.port, retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 3000, adminPassword: null, apiKey: null, trustProxy: false };
     await assert.rejects(() => createApp(cfg, { log: () => {} }), /EADDRINUSE|address already in use/);
     let left = -1;
     for (let i = 0; i < 20; i++) { // closing is asynchronous: wait for it, up to 4 s
@@ -519,4 +519,30 @@ test('infrastructure errors are logged as a fixed event without the error text',
     assert.ok(text.includes('infrastructure_error') && text.includes('"source":"pool"'));
     assert.ok(!text.includes('hunter2') && !text.includes('db.internal'));
   });
+});
+
+test('the embedded /app surface: absent without SHOPIFY_API_KEY; with it, only a Shopify-signed token for a shop the service knows gets in', { skip, timeout: 60_000 }, async () => {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const tok = (shop: string) => {
+    const now = Math.floor(Date.now() / 1000);
+    const h = b64({ alg: 'HS256', typ: 'JWT' });
+    const p = b64({ iss: `https://${shop}/admin`, dest: `https://${shop}`, aud: 'APP-CLIENT-ID', exp: now + 60, nbf: now - 5, sub: '1' });
+    return `${h}.${p}.${createHmac('sha256', SIGNING).update(`${h}.${p}`).digest('base64url')}`;
+  };
+  await withApp(async ({ url }) => {
+    assert.equal((await fetch(`${url}/app?shop=${SHOP}`)).status, 404, 'switched off without the client id');
+    assert.equal((await fetch(`${url}/app/api/home`, { headers: { Authorization: `Bearer ${tok(SHOP)}` } })).status, 404);
+  });
+  await withApp(async ({ app, url }) => {
+    const shell = await fetch(`${url}/app?shop=${SHOP}`);
+    assert.equal(shell.status, 200);
+    assert.match(shell.headers.get('content-security-policy') ?? '', /frame-ancestors https:\/\/example-store\.myshopify\.com https:\/\/admin\.shopify\.com/);
+    // the shop was connected by withApp, so it is known
+    const ok = await fetch(`${url}/app/api/home`, { headers: { Authorization: `Bearer ${tok(SHOP)}` } });
+    assert.equal(ok.status, 200);
+    assert.equal((await fetch(`${url}/app/api/home`, { headers: { Authorization: `Bearer ${tok('stranger.myshopify.com')}` } })).status, 403);
+    assert.equal((await fetch(`${url}/app/api/home`)).status, 401);
+    assert.equal(await app.stores.connections.get('stranger.myshopify.com'), null, 'a valid token does not create a shop');
+    assert.equal((await fetch(`${url}/healthz`)).status, 200, 'the rest of the service is untouched');
+  }, { apiKey: 'APP-CLIENT-ID' });
 });

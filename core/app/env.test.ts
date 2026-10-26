@@ -63,3 +63,12 @@ test('ADMIN_PASSWORD: unset = admin off; set = at least 12 characters; the value
     assert.ok(e instanceof ConfigError && e.message.includes('ADMIN_PASSWORD') && !e.message.includes('short-pw'));
   }
 });
+
+test('SHOPIFY_API_KEY (the public client id) switches the embedded app page on; unset it is off; a malformed one is rejected by name', () => {
+  assert.equal(loadEnv(good).apiKey, null);
+  assert.equal(loadEnv({ ...good, SHOPIFY_API_KEY: '' }).apiKey, null);
+  assert.equal(loadEnv({ ...good, SHOPIFY_API_KEY: 'a1b2c3d4e5f60718' }).apiKey, 'a1b2c3d4e5f60718');
+  for (const bad of ['short', 'has space in it!', '"><script>', 'x'.repeat(200)]) {
+    assert.throws(() => loadEnv({ ...good, SHOPIFY_API_KEY: bad }), (e: any) => e instanceof ConfigError && e.message.includes('SHOPIFY_API_KEY') && !e.message.includes(bad), bad);
+  }
+});
