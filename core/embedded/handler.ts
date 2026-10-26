@@ -6,7 +6,9 @@
 //   GET /app/api/home        HTML fragment (setup status + latest decisions), needs `Authorization: Bearer <ID token>`
 //   GET /app/api/log         HTML fragment (decision log, ?outcome= & ?page=), same auth
 //   GET /app/api/setup       HTML fragment (Salesforce connection and recipe controls)
-//   POST /app/api/connection | /verify | /recipe   the write actions (core/admin/actions.ts), form-encoded body, same auth
+//   POST /app/api/connection | /verify | /recipe   the write actions (core/admin/actions.ts), form-encoded body, same auth.
+//                            Going LIVE is deliberately NOT available here (owner decision 2026-10-27): a `go_live` request is refused with
+//                            403 and nothing is written; it needs the operator password on /admin.
 // The shop is ALWAYS the one in the verified token; a `shop` in the query string or body of an API call is never read. A write is
 // recorded in the audit trail with the Shopify user id from the token. Writes need `Content-Type: application/x-www-form-urlencoded`.
 //
@@ -141,6 +143,10 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
 
   // Runs a write action for the token's shop, records it (with the Shopify user), and shows the setup page with the result.
   async function act(route: 'connection' | 'verify' | 'recipe', shop: string, userId: string | null, form: Map<string, string>): Promise<{ status: number; html: string }> {
+    if (route === 'recipe' && form.get('action') === 'go_live') {
+      deps.log?.('info', 'embedded_go_live_refused', { shop });
+      return { status: 403, html: setupFragment(await setupData(shop, { errors: ['Going live is done from the operator admin page, with the operator password.'] })) };
+    }
     const outcome: ActionOutcome = route === 'connection' ? await saveConnection(deps.actions, shop, form)
       : route === 'verify' ? await verifyConnection(deps.actions, shop) : await recipeAction(deps.actions, shop, form);
     const audit = ('audit' in outcome ? outcome.audit : undefined);

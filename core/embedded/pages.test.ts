@@ -109,7 +109,7 @@ const setup = (over: Partial<SetupData> = {}): SetupData => ({
 test('setup: the forms post only to our write routes, and the secret field is a password field that never carries a value', () => {
   const html = setupFragment(setup({ connection: { stored: true, lastVerifiedAt: '2026-10-26T10:00:00Z', loginUrl: 'https://acme.my.salesforce.com', clientId: 'KEY123' } }));
   const posts = [...html.matchAll(/<form data-post="([^"]*)"/g)].map((m) => m[1]);
-  assert.deepEqual(posts, ['/app/api/connection', '/app/api/verify', '/app/api/recipe', '/app/api/recipe', '/app/api/recipe']);
+  assert.deepEqual(posts, ['/app/api/connection', '/app/api/verify', '/app/api/recipe', '/app/api/recipe']);
   assert.ok(html.includes('<s-password-field label="Consumer secret" name="clientSecret" autocomplete="off"></s-password-field>'));
   assert.ok(!/<s-password-field[^>]*value=/.test(html), 'no value attribute on the secret field');
   assert.ok(html.includes('Org: https://acme.my.salesforce.com · client id: KEY123'));
@@ -119,10 +119,11 @@ test('setup: the forms post only to our write routes, and the secret field is a 
   assert.ok(fresh.includes('Save connection') && !fresh.includes('Test connection') && fresh.includes('<s-badge tone="caution">not set</s-badge>'));
 });
 
-test('setup: three recipe actions, the go-live form asks for the word LIVE, and the mode badge is right', () => {
+test('setup: only the safe recipe actions are offered (no go-live), pointing to the operator page; the mode badge is right', () => {
   const html = setupFragment(setup());
-  for (const a of ['enable_dry', 'disable', 'go_live']) assert.ok(html.includes(`name="action" value="${a}"`), a);
-  assert.ok(html.includes('Type LIVE to confirm') && html.includes('name="confirm"'));
+  for (const a of ['enable_dry', 'disable']) assert.ok(html.includes(`name="action" value="${a}"`), a);
+  assert.ok(!html.includes('go_live') && !html.includes('name="confirm"') && !html.includes('Go live</s-button>') && !html.includes('Type LIVE'));
+  assert.ok(html.includes('<s-link href="/admin" target="_blank">operator admin page</s-link>') && html.includes('needs the operator password'));
   assert.ok(html.includes('NOT CONFIGURED'));
   assert.ok(setupFragment(setup({ recipe: { name: 'R', configured: true, enabled: true, dryRun: false } })).includes('<s-badge tone="critical">LIVE</s-badge>'));
   assert.ok(setupFragment(setup({ recipe: { name: 'R', configured: true, enabled: true, dryRun: true } })).includes('DRY-RUN'));
