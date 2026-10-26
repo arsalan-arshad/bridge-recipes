@@ -50,9 +50,16 @@ test('the shell names the shop in frame-ancestors, loads Shopify scripts, is not
     assert.equal(r.headers.get('cache-control'), 'no-store');
     const html = await r.text();
     assert.ok(html.includes(`<meta name="shopify-api-key" content="${ID}">`));
-    assert.ok(html.includes('https://cdn.shopify.com/shopifycloud/app-bridge.js') && html.includes('/app/assets/app.js'));
-    assert.ok(!/<script>[^<]/.test(html), 'no inline script');
-    assert.ok(!html.includes(SHOP) && !html.includes('host=abc'), 'the shell echoes nothing from the request');
+    // every script tag is an external one, and the list of sources is exactly Shopify's two scripts plus ours (no inline script)
+    const scripts = html.split('<script').slice(1).map((part) => part.slice(0, part.indexOf('>')));
+    assert.deepEqual(scripts, [
+      ' src="https://cdn.shopify.com/shopifycloud/app-bridge.js"',
+      ' src="https://cdn.shopify.com/shopifycloud/polaris.js"',
+      ' src="/app/assets/app.js"',
+    ]);
+    assert.equal(html.split('</script>').length - 1, scripts.length, 'no script has a body');
+    assert.equal(html.split(SHOP).length, 1, 'the shell echoes no shop name from the request');
+    assert.equal(html.split('host=abc').length, 1, 'the shell echoes no query value from the request');
   });
 });
 
