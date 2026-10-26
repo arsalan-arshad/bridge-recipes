@@ -1,10 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createEmbeddedHandler, failedJobsFor } from './handler.ts';
 import type { EmbeddedData } from './handler.ts';
+import type { ActionDeps } from '../admin/actions.ts';
+import { ConfigValidationError } from '../../recipes/retail-b2b-lead-spotter/validateConfig.ts';
+import { MemoryConnectionStore } from '../salesforce/connectionStore.ts';
+import type { RecipeSettings } from '../worker/recipe.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
 const SECRET = 'test-client-secret';
@@ -36,11 +40,35 @@ function fakeData(over: Partial<EmbeddedData> = {}) {
   return { data, calls };
 }
 
-async function withServer(fn: (url: string, logs: string[], calls: string[]) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData> } = {}) {
+// The shared write actions over in-memory stores, plus a record of every audit entry.
+function fakeWrites(opts: { verify?: ActionDeps['verify']; auditFails?: boolean } = {}) {
+  const settings = new Map<string, RecipeSettings>();
+  const connections = new MemoryConnectionStore();
+  const audits: { action: string; shop?: string; detail?: string }[] = [];
+  const actions: ActionDeps = {
+    recipe: {
+      id: 'R', defaultConfig: { minOrderTotal: 0 },
+      validate: (c: any) => { if (c.bad) throw new ConfigValidationError(['bad']); return c; },
+      fromForm: (f) => ({ bad: false, minOrderTotal: f.get('minOrderTotal') }),
+    },
+    connections: { get: (s) => connections.get(s), put: (s, c) => connections.put(s, c), markVerified: (s, at) => connections.markVerified(s, at), info: async (s) => ({ stored: (await connections.get(s)) !== null }) } as any,
+    configs: {
+      get: async (s, r) => settings.get(`${s}|${r}`) ?? null,
+      set: async (s, r, v) => { settings.set(`${s}|${r}`, { enabled: v.enabled, dryRun: v.dryRun ?? true, config: v.config }); },
+      disable: async (s, r) => { const c = settings.get(`${s}|${r}`); if (!c) return false; settings.set(`${s}|${r}`, { ...c, enabled: false }); return true; },
+    },
+    verify: opts.verify ?? (async () => ({ ok: true })),
+  };
+  const audit = { record: async (e: { action: string; shop?: string; detail?: string }) => { if (opts.auditFails) throw new Error('audit down'); audits.push(e); } };
+  return { actions, audit, settings, connections, audits };
+}
+
+async function withServer(fn: (url: string, logs: string[], calls: string[], w: ReturnType<typeof fakeWrites>) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData>; writes?: Parameters<typeof fakeWrites>[0] } = {}) {
   const logs: string[] = [];
+  const w = fakeWrites(opts.writes);
   const { data, calls } = fakeData(opts.data);
   const handle = createEmbeddedHandler({
-    clientId: ID, clientSecret: SECRET, now: () => NOW, data,
+    clientId: ID, clientSecret: SECRET, now: () => NOW, data, actions: w.actions, audit: w.audit,
     knownShop: opts.known ?? (async (s) => s === SHOP),
     log: (_l, event, fields) => logs.push(`${event} ${JSON.stringify(fields ?? {})}`),
   });
@@ -49,7 +77,7 @@ async function withServer(fn: (url: string, logs: string[], calls: string[]) => 
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   try {
-    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, logs, calls);
+    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, logs, calls, w);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
@@ -224,4 +252,156 @@ test('failed jobs are counted per shop, never across shops', () => {
   assert.equal(failedJobsFor(jobs, 'other-shop.myshopify.com'), 1);
   assert.equal(failedJobsFor(jobs, 'nobody.myshopify.com'), 0);
   assert.equal(failedJobsFor([], SHOP), 0);
+});
+
+// ---- the write routes -------------------------------------------------------------------------------------------------------------------
+const FORM = { 'Content-Type': 'application/x-www-form-urlencoded' };
+const post = (url: string, path: string, body: Record<string, string>, headers: Record<string, string> = { ...bearer(token()), ...FORM }) =>
+  fetch(`${url}${path}`, { method: 'POST', headers, body: new URLSearchParams(body).toString() });
+
+test('setup page: needs a token, shows the connection and recipe controls', async () => {
+  await withServer(async (url) => {
+    assert.equal((await fetch(`${url}/app/api/setup`)).status, 401);
+    const r = await fetch(`${url}/app/api/setup`, { headers: bearer(token()) });
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.ok(html.includes('data-post="/app/api/connection"') && html.includes('data-post="/app/api/recipe"') && html.includes('DRY-RUN'));
+  });
+});
+
+test('writes need the token, a form body, a small body, and the right method', async () => {
+  await withServer(async (url, logs, _c, w) => {
+    const body = { action: 'enable_dry' };
+    for (const path of ['/app/api/connection', '/app/api/verify', '/app/api/recipe']) {
+      assert.equal((await post(url, path, body, FORM)).status, 401, `${path} without a token`);
+      assert.equal((await post(url, path, body, { ...bearer(token({}, 'other')), ...FORM })).status, 401, `${path} with a forged token`);
+      assert.equal((await fetch(`${url}${path}`, { headers: bearer(token()) })).status, 405, `${path} by GET`);
+      assert.equal((await fetch(`${url}${path}`, { method: 'PUT', headers: { ...bearer(token()), ...FORM }, body: '' })).status, 405, `${path} by PUT`);
+    }
+    assert.equal((await fetch(`${url}/app/api/recipe`, { method: 'POST', headers: { ...bearer(token()), 'Content-Type': 'application/json' }, body: '{"action":"enable_dry"}' })).status, 415);
+    assert.equal((await fetch(`${url}/app/api/recipe`, { method: 'POST', headers: bearer(token()), body: 'action=enable_dry' })).status, 415, 'no content type');
+    const big = await fetch(`${url}/app/api/recipe`, { method: 'POST', headers: { ...bearer(token()), ...FORM }, body: `action=enable_dry&pad=${'x'.repeat(70_000)}` });
+    assert.equal(big.status, 413);
+    assert.equal((await post(url, '/app/api/recipe', { action: 'enable_dry' }, { ...bearer(token()), ...FORM })).status, 200, 'and a good one still works');
+    assert.equal(w.audits.length, 1, 'only the good one was recorded');
+    assert.ok(!logs.join('\n').includes(SECRET));
+  });
+});
+
+test('connection: stored for the TOKEN shop (a shop in the body is ignored), audited with the Shopify user, and the secret is never echoed, audited or logged', async () => {
+  await withServer(async (url, logs, _c, w) => {
+    const r = await post(url, '/app/api/connection', { loginUrl: 'https://acme.my.salesforce.com', clientId: 'KEY-1', clientSecret: 'TOP-SECRET-VALUE', shop: 'other-shop.myshopify.com' });
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.ok(html.includes('Salesforce connection saved') && html.includes('client id: KEY-1'));
+    assert.ok(!html.includes('TOP-SECRET-VALUE'));
+    assert.equal((await w.connections.get(SHOP))?.clientSecret, 'TOP-SECRET-VALUE');
+    assert.equal(await w.connections.get('other-shop.myshopify.com'), null);
+    assert.deepEqual(w.audits, [{ action: 'connection_saved', shop: SHOP, detail: 'user 42' }]);
+    assert.ok(!JSON.stringify(w.audits).includes('TOP-SECRET-VALUE') && !logs.join('\n').includes('TOP-SECRET-VALUE'));
+  }, { data: { summary: async (shop) => ({ connection: { stored: true, lastVerifiedAt: null, loginUrl: 'https://acme.my.salesforce.com', clientId: 'KEY-1' }, recipe: { name: 'R', configured: false, enabled: false, dryRun: true } }) } });
+});
+
+test('connection: a bad one is refused with the problem shown, nothing is stored or audited', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    for (const bad of [{ loginUrl: 'https://evil.example.com', clientId: 'a', clientSecret: 'SECRET-B' }, { loginUrl: 'https://acme.my.salesforce.com', clientId: '', clientSecret: 'SECRET-B' }, {}]) {
+      const r = await post(url, '/app/api/connection', bad);
+      assert.equal(r.status, 400);
+      const html = await r.text();
+      assert.ok(html.includes('heading="Connection problem"') && !html.includes('SECRET-B'));
+    }
+    assert.equal(await w.connections.get(SHOP), null);
+    assert.deepEqual(w.audits, []);
+  });
+});
+
+test('go live: the exact word LIVE and a stored connection are both required; every step is audited with the user', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const go = (confirm: string) => post(url, '/app/api/recipe', { action: 'go_live', confirm });
+    for (const c of ['', 'live', 'LIVE ', 'yes']) assert.equal((await go(c)).status, 400, JSON.stringify(c));
+    const noConn = await go('LIVE');
+    assert.equal(noConn.status, 400);
+    assert.ok((await noConn.text()).includes('connect Salesforce first'));
+    assert.equal(w.settings.size, 0, 'nothing written');
+    assert.deepEqual(w.audits, []);
+    await post(url, '/app/api/connection', { loginUrl: 'https://acme.my.salesforce.com', clientId: 'K', clientSecret: 'S' });
+    const live = await go('LIVE');
+    assert.equal(live.status, 200);
+    assert.deepEqual(w.settings.get(`${SHOP}|R`), { enabled: true, dryRun: false, config: { minOrderTotal: 0 } });
+    assert.deepEqual(w.audits.map((a) => [a.action, a.detail]), [['connection_saved', 'user 42'], ['recipe_live', 'user 42']]);
+    await post(url, '/app/api/recipe', { action: 'disable' });
+    assert.equal(w.settings.get(`${SHOP}|R`)?.enabled, false);
+    await post(url, '/app/api/recipe', { action: 'enable_dry' });
+    assert.deepEqual([w.settings.get(`${SHOP}|R`)?.enabled, w.settings.get(`${SHOP}|R`)?.dryRun], [true, true]);
+    assert.deepEqual(w.audits.map((a) => a.action), ['connection_saved', 'recipe_live', 'recipe_disabled', 'recipe_dry_run']);
+  });
+});
+
+test('an unknown action is refused with a fixed message and writes nothing', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    for (const action of ['', 'go-live', 'delete', '<img src=x>']) {
+      const r = await post(url, '/app/api/recipe', { action });
+      assert.equal(r.status, 400);
+      const html = await r.text();
+      assert.ok(html.includes('That action is not recognised.') && !html.includes('<img'));
+    }
+    assert.equal(w.settings.size, 0);
+    assert.deepEqual(w.audits, []);
+  });
+});
+
+test('test connection: a failure shows its reason and is audited as failed, with the user', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const bad = await post(url, '/app/api/verify', {});
+    assert.equal(bad.status, 200);
+    assert.ok((await bad.text()).includes('Connection check failed: invalid_client'));
+    assert.deepEqual(w.audits, [{ action: 'connection_failed', shop: SHOP, detail: 'invalid_client · user 42' }]);
+  }, { writes: { verify: async () => ({ ok: false, reason: 'invalid_client' }) } });
+  await withServer(async (url, _l, _c, w) => {
+    assert.ok((await (await post(url, '/app/api/verify', {})).text()).includes('The Salesforce connection works.'));
+    assert.deepEqual(w.audits, [{ action: 'connection_verified', shop: SHOP, detail: 'user 42' }]);
+  });
+});
+
+test('a token without a user id is still audited (no user part); a failing audit does not undo the action but is logged', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const r = await post(url, '/app/api/recipe', { action: 'enable_dry' }, { ...bearer(token({ sub: undefined })), ...FORM });
+    assert.equal(r.status, 200);
+    assert.deepEqual(w.audits, [{ action: 'recipe_dry_run', shop: SHOP, detail: undefined }]);
+  });
+  await withServer(async (url, logs, _c, w) => {
+    const r = await post(url, '/app/api/recipe', { action: 'enable_dry' });
+    assert.equal(r.status, 200);
+    assert.equal(w.settings.get(`${SHOP}|R`)?.enabled, true);
+    assert.deepEqual(logs, ['embedded_audit_failed {"action":"recipe_dry_run"}']);
+  }, { writes: { auditFails: true } });
+});
+
+test('writes for a shop the operator has not set up are 403 and change nothing', async () => {
+  await withServer(async (url, logs, _c, w) => {
+    const r = await post(url, '/app/api/recipe', { action: 'enable_dry' });
+    assert.equal(r.status, 403);
+    assert.equal(w.settings.size, 0);
+    assert.deepEqual(w.audits, []);
+    assert.deepEqual(logs, [`embedded_unknown_shop {"shop":"${SHOP}"}`]);
+  }, { known: async () => false });
+});
+
+test('an oversized body with NO declared length (chunked) is refused at the cap, not read to the end', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const u = new globalThis.URL(url);
+    const status = await new Promise<number | undefined>((resolve) => {
+      const req = httpRequest({ host: u.hostname, port: u.port, path: '/app/api/recipe', method: 'POST', headers: { ...bearer(token()), ...FORM, 'Transfer-Encoding': 'chunked' } }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      });
+      req.on('error', () => resolve(undefined));
+      req.write('action=enable_dry&pad=');
+      for (let i = 0; i < 80; i++) req.write(Buffer.alloc(1024, 120)); // 80 KB, over the 64 KB cap
+      req.end();
+    });
+    assert.ok(status === 413 || status === undefined, `status ${status}`);
+    assert.equal(w.settings.size, 0, 'nothing was done with the oversized body');
+    assert.deepEqual(w.audits, []);
+  });
 });

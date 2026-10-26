@@ -5,7 +5,10 @@
 //   GET /app/assets/app.js   the small browser script
 //   GET /app/api/home        HTML fragment (setup status + latest decisions), needs `Authorization: Bearer <ID token>`
 //   GET /app/api/log         HTML fragment (decision log, ?outcome= & ?page=), same auth
-// The shop is ALWAYS the one in the verified token; a `shop` in the query string of an API call is never read.
+//   GET /app/api/setup       HTML fragment (Salesforce connection and recipe controls)
+//   POST /app/api/connection | /verify | /recipe   the write actions (core/admin/actions.ts), form-encoded body, same auth
+// The shop is ALWAYS the one in the verified token; a `shop` in the query string or body of an API call is never read. A write is
+// recorded in the audit trail with the Shopify user id from the token. Writes need `Content-Type: application/x-www-form-urlencoded`.
 //
 // No cookies: the ID token is the credential and App Bridge gives a fresh one per request. A bad token gets 401 plus
 // X-Shopify-Retry-Invalid-Session-Request so App Bridge fetches a new one; a valid token for a shop we do not know gets 403.
@@ -13,8 +16,11 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { esc } from '../admin/html.ts';
-import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, logFragment } from './pages.ts';
-import type { HomeData } from './pages.ts';
+import { FormError, MAX_FORM_BYTES, parseForm } from '../admin/forms.ts';
+import { recipeAction, saveConnection, verifyConnection } from '../admin/actions.ts';
+import type { ActionDeps, ActionOutcome } from '../admin/actions.ts';
+import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, logFragment, setupFragment } from './pages.ts';
+import type { HomeData, SetupData } from './pages.ts';
 import { SHOP_PATTERN, verifySessionToken } from './token.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
@@ -25,7 +31,7 @@ const ADMIN_HOST = 'https://admin.shopify.com';
 
 const SCRIPT = readFileSync(new globalThis.URL('./assets/app.js', import.meta.url));
 
-// What the pages need, per shop. Read-only: the embedded surface writes nothing in this step.
+// What the pages need, per shop (reads only; writes go through `actions`).
 export interface EmbeddedData {
   summary(shop: string): Promise<Pick<HomeData, 'connection' | 'recipe'>>;
   recent(f: { shop: string; outcome?: string; limit: number; offset: number }): Promise<LogEntry[]>;
@@ -42,6 +48,8 @@ export interface EmbeddedDeps {
   clientSecret: string; // the app's client secret: signs the ID token
   knownShop: (shop: string) => Promise<boolean>;
   data: EmbeddedData;
+  actions: ActionDeps; // the shared write actions
+  audit: { record(e: { action: string; shop?: string; detail?: string }): Promise<void> };
   now: () => number;
   log?: (level: 'info' | 'error', event: string, fields?: Record<string, unknown>) => void;
 }
@@ -73,14 +81,56 @@ function shell(clientId: string): string {
 <script src="/app/assets/app.js"></script></body></html>`;
 }
 
+type Route = 'home' | 'log' | 'setup' | 'connection' | 'verify' | 'recipe';
+const READS = new Set<string>(['home', 'log', 'setup']);
+const ROUTES: Record<string, Route> = {
+  '/app/api/home': 'home', '/app/api/log': 'log', '/app/api/setup': 'setup',
+  '/app/api/connection': 'connection', '/app/api/verify': 'verify', '/app/api/recipe': 'recipe',
+};
+
+class HttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(String(status));
+    this.status = status;
+  }
+}
+
+async function readForm(req: IncomingMessage): Promise<Map<string, string>> {
+  if (!String(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/x-www-form-urlencoded')) throw new HttpError(415);
+  if (Number(req.headers['content-length'] ?? 0) > MAX_FORM_BYTES) throw new HttpError(413);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > MAX_FORM_BYTES) throw new HttpError(413);
+    chunks.push(c as Buffer);
+  }
+  try {
+    return parseForm(Buffer.concat(chunks).toString('utf8'));
+  } catch (e) {
+    throw new HttpError(e instanceof FormError ? e.status : 400);
+  }
+}
+
 export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage, res: ServerResponse) => boolean {
-  async function render(route: 'home' | 'log', shop: string, query: URLSearchParams): Promise<string> {
+  const text = (res: ServerResponse, status: number, body: string, extra: Record<string, string> = {}) =>
+    res.writeHead(status, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8', ...extra }).end(body);
+  const fragment = (res: ServerResponse, status: number, html: string) =>
+    res.writeHead(status, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'" }).end(html);
+
+  async function setupData(shop: string, extra: Pick<SetupData, 'msg' | 'errors' | 'connError'> = {}): Promise<SetupData> {
+    return { shop, ...(await deps.data.summary(shop)), ...extra };
+  }
+
+  async function render(route: Route, shop: string, query: URLSearchParams): Promise<string> {
     if (route === 'home') {
       const [summary, recent, failedJobs] = await Promise.all([
         deps.data.summary(shop), deps.data.recent({ shop, limit: HOME_SAMPLE, offset: 0 }), deps.data.failedJobs(shop),
       ]);
       return homeFragment({ shop, ...summary, recent, failedJobs });
     }
+    if (route === 'setup') return setupFragment(await setupData(shop));
     const asked = query.get('outcome') ?? '';
     const outcome = LOG_OUTCOMES.includes(asked) ? asked : ''; // anything else means "all"
     const n = Number(query.get('page') ?? '1');
@@ -89,37 +139,54 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
     return logFragment({ shop, outcome, page, entries: rows.slice(0, PAGE_SIZE), hasNext: rows.length > PAGE_SIZE });
   }
 
-  async function api(req: IncomingMessage, res: ServerResponse, route: 'home' | 'log', query: URLSearchParams): Promise<void> {
+  // Runs a write action for the token's shop, records it (with the Shopify user), and shows the setup page with the result.
+  async function act(route: 'connection' | 'verify' | 'recipe', shop: string, userId: string | null, form: Map<string, string>): Promise<{ status: number; html: string }> {
+    const outcome: ActionOutcome = route === 'connection' ? await saveConnection(deps.actions, shop, form)
+      : route === 'verify' ? await verifyConnection(deps.actions, shop) : await recipeAction(deps.actions, shop, form);
+    const audit = ('audit' in outcome ? outcome.audit : undefined);
+    if (audit) {
+      const detail = [audit.detail, userId ? `user ${userId}` : null].filter(Boolean).join(' · ') || undefined;
+      try {
+        await deps.audit.record({ action: audit.action, shop, detail });
+      } catch {
+        deps.log?.('error', 'embedded_audit_failed', { action: audit.action });
+      }
+    }
+    if (outcome.ok) return { status: 200, html: setupFragment(await setupData(shop, { msg: outcome.msg })) };
+    if (outcome.kind === 'bad_request') return { status: 400, html: setupFragment(await setupData(shop, { errors: ['That action is not recognised.'] })) };
+    if (outcome.kind === 'connection') return { status: outcome.status, html: setupFragment(await setupData(shop, { connError: outcome.message })) };
+    return { status: outcome.status, html: setupFragment(await setupData(shop, { errors: outcome.errors })) };
+  }
+
+  async function api(req: IncomingMessage, res: ServerResponse, route: Route, query: URLSearchParams): Promise<void> {
     const auth = String(req.headers.authorization ?? '');
     const m = /^Bearer ([A-Za-z0-9._-]+)$/.exec(auth);
     const verdict = verifySessionToken(m ? m[1] : '', { clientSecret: deps.clientSecret, clientId: deps.clientId, nowMs: deps.now() });
     if (!verdict.ok) {
       deps.log?.('info', 'embedded_token_refused', { reason: verdict.reason });
-      res.writeHead(401, { ...BASE_HEADERS, 'X-Shopify-Retry-Invalid-Session-Request': '1', 'Content-Type': 'text/plain; charset=utf-8' }).end('unauthorized');
-      return;
+      return text(res, 401, 'unauthorized', { 'X-Shopify-Retry-Invalid-Session-Request': '1' });
     }
     let known = false;
     try {
       known = await deps.knownShop(verdict.shop);
     } catch {
       deps.log?.('error', 'embedded_shop_lookup_failed');
-      res.writeHead(503, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('unavailable');
-      return;
+      return text(res, 503, 'unavailable');
     }
     if (!known) {
       deps.log?.('info', 'embedded_unknown_shop', { shop: verdict.shop });
-      res.writeHead(403, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('forbidden');
-      return;
+      return text(res, 403, 'forbidden');
     }
-    let html: string;
     try {
-      html = await render(route, verdict.shop, query);
-    } catch {
+      if (READS.has(route)) return fragment(res, 200, await render(route, verdict.shop, query));
+      const form = await readForm(req);
+      const out = await act(route as 'connection' | 'verify' | 'recipe', verdict.shop, verdict.userId, form);
+      return fragment(res, out.status, out.html);
+    } catch (e) {
+      if (e instanceof HttpError) return text(res, e.status, 'rejected');
       deps.log?.('error', 'embedded_data_failed', { route });
-      res.writeHead(500, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('error');
-      return;
+      return text(res, 500, 'error');
     }
-    res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'" }).end(html);
   }
 
   return (req, res) => {
@@ -127,15 +194,17 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
     const path = url.pathname;
     if (path !== '/app' && !path.startsWith('/app/')) return false;
 
-    if (req.method !== 'GET') {
-      res.writeHead(405, { ...BASE_HEADERS, Allow: 'GET' }).end();
+    const route = Object.hasOwn(ROUTES, path) ? ROUTES[path] : undefined;
+    const allowed = route === undefined ? 'GET' : READS.has(route) ? 'GET' : 'POST';
+    if (req.method !== allowed) {
+      res.writeHead(405, { ...BASE_HEADERS, Allow: allowed }).end();
       return true;
     }
     if (path === '/app') {
       const shop = (url.searchParams.get('shop') ?? '').toLowerCase();
       // the shop goes into a response header (frame-ancestors): accept only a plain myshopify.com host, nothing else
       if (!SHOP_PATTERN.test(shop)) {
-        res.writeHead(400, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('Open this app from the Shopify admin.');
+        text(res, 400, 'Open this app from the Shopify admin.');
         return true;
       }
       res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': shellCsp(shop) }).end(shell(deps.clientId));
@@ -145,14 +214,14 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
       res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }).end(SCRIPT);
       return true;
     }
-    if (path === '/app/api/home' || path === '/app/api/log') {
-      api(req, res, path === '/app/api/home' ? 'home' : 'log', url.searchParams).catch(() => {
+    if (route) {
+      api(req, res, route, url.searchParams).catch(() => {
         if (!res.headersSent) res.writeHead(500, BASE_HEADERS);
         res.end();
       });
       return true;
     }
-    res.writeHead(404, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
+    text(res, 404, 'Not found');
     return true;
   };
 }

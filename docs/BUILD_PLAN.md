@@ -36,7 +36,7 @@ Each milestone is shippable on its own.
 - [ ] Threshold config, one-alert-ever rule, owner resolution, tests.
 
 ## M7 — App Store readiness (Phase B, only if R1 proven)
-- [ ] Embedded admin UI (owner decision 2026-10-26): milestones E1-E5 in `docs/EMBEDDED_UI.md` (skeleton and token check, then the pages, then review prep). E0 design and E1 skeleton (token check, `/app` shell) done and seen working in the dev store; E2 home page and read-only log built and tested (not yet seen in the dev store); E3-E5 not started.
+- [ ] Embedded admin UI (owner decision 2026-10-26): milestones E1-E5 in `docs/EMBEDDED_UI.md` (skeleton and token check, then the pages, then review prep). E0 design and E1 skeleton (token check, `/app` shell) done and seen working in the dev store; E2 home page and read-only log built and seen working in the dev store; E3a shared shop write actions merged; E3b-1 (setup page: Salesforce connection, test, recipe controls with the LIVE gate) built and tested, not yet seen in the dev store; E3b-2 (settings form, failed-job replay), E4 and E5 not started.
 - [ ] Protected customer data request (level 2) with a clear purpose statement; data protection answers.
 - [ ] Run the `shopify-app-store-review` self-review; pricing plan registered ($0 Free).
 

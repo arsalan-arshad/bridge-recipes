@@ -41,9 +41,16 @@ function decisionsTable(entries: LogEntry[], full: boolean): string {
   return `<s-table><s-table-header-row>${head}</s-table-header-row><s-table-body>${rows}</s-table-body></s-table>`;
 }
 
+export interface ConnectionView {
+  stored: boolean;
+  lastVerifiedAt: string | null;
+  loginUrl?: string; // shown so the operator can see which org it points at; the secret is never part of the data
+  clientId?: string;
+}
+
 export interface HomeData {
   shop: string;
-  connection: { stored: boolean; lastVerifiedAt: string | null };
+  connection: ConnectionView;
   recipe: { name: string; configured: boolean; enabled: boolean; dryRun: boolean };
   recent: LogEntry[]; // newest first, at most HOME_SAMPLE
   failedJobs: number;
@@ -79,7 +86,8 @@ export function homeFragment(d: HomeData): string {
 <s-paragraph>Salesforce connection: ${conn}</s-paragraph>
 <s-paragraph>${esc(r.name)}: ${mode}</s-paragraph>
 <s-paragraph>Failed jobs: ${failed}</s-paragraph>
-<s-paragraph><s-text color="subdued">${next ? `${esc(next)} ` : ''}Connecting, settings, the go-live switch and replay move into this page next; until then use the ${operator}.</s-text></s-paragraph>
+<s-paragraph><s-text color="subdued">${next ? `${esc(next)} ` : ''}Settings and failed-job replay move into this page next; until then use the ${operator}.</s-text></s-paragraph>
+<s-paragraph>${view('/app/api/setup', 'Set up Salesforce and the recipe', 'primary')}</s-paragraph>
 </s-section>
 <s-section heading="Latest decisions">
 ${d.recent.length === 0 ? '<s-paragraph>No orders have been processed for this store yet.</s-paragraph>' : `<s-paragraph>Last ${d.recent.length} decision${d.recent.length === 1 ? '' : 's'}: ${countBadges}</s-paragraph>${decisionsTable(d.recent.slice(0, 5), false)}`}
@@ -109,4 +117,58 @@ export function logFragment(d: LogData): string {
 <s-section><s-paragraph>${view('/app/api/home', 'Back to home')}</s-paragraph><s-paragraph>Show: ${filters}</s-paragraph></s-section>
 <s-section padding="none">${decisionsTable(d.entries, true)}</s-section>
 <s-section><s-paragraph>${paging}</s-paragraph><s-paragraph><s-text color="subdued">Personal values are masked in the log, and the order payload is never stored in it.</s-text></s-paragraph></s-section></s-page>`;
+}
+
+// ---- setup page: the Salesforce connection and the recipe controls (the first screens that WRITE) --------------------------------------------
+
+// What the operator is told after an action (codes come from core/admin/actions.ts). Fixed text only.
+export const NOTICES: Record<string, { tone: 'success' | 'warning'; text: string }> = {
+  connection_saved: { tone: 'success', text: 'Salesforce connection saved. The secret is stored encrypted and is never shown again. Use "Test connection".' },
+  verified_ok: { tone: 'success', text: 'The Salesforce connection works.' },
+  enabled_dry: { tone: 'success', text: 'Recipe enabled in DRY-RUN: it reads from Salesforce and logs what it would do, but writes nothing.' },
+  live: { tone: 'warning', text: 'Recipe is now LIVE: it writes Leads and Tasks to Salesforce.' },
+  disabled: { tone: 'warning', text: 'Recipe disabled (kill switch): no Salesforce calls from the next job on.' },
+};
+
+export interface SetupData {
+  shop: string;
+  connection: ConnectionView;
+  recipe: { name: string; configured: boolean; enabled: boolean; dryRun: boolean };
+  msg?: string; // a key of NOTICES
+  errors?: string[]; // settings/go-live problems (fixed or validated text)
+  connError?: string; // a connection problem (already free of secrets)
+}
+
+const field = (label: string, name: string, extra = '') => `<s-text-field label="${esc(label)}" name="${esc(name)}" autocomplete="off" ${extra}></s-text-field>`;
+
+export function setupFragment(d: SetupData): string {
+  const r = d.recipe;
+  const mode = !r.enabled ? badge(r.configured ? 'DISABLED' : 'NOT CONFIGURED', 'caution') : r.dryRun ? badge('DRY-RUN', 'success') : badge('LIVE', 'critical');
+  const note = d.msg && Object.hasOwn(NOTICES, d.msg) ? `<s-banner tone="${NOTICES[d.msg].tone}">${esc(NOTICES[d.msg].text)}</s-banner>` : '';
+  const problems = d.errors && d.errors.length ? `<s-banner tone="critical" heading="Not done">${d.errors.map(esc).join('; ')}</s-banner>` : '';
+  const connProblem = d.connError ? `<s-banner tone="critical" heading="Connection problem">${esc(d.connError)}</s-banner>` : '';
+  const c = d.connection;
+  const status = c.stored
+    ? `${badge('stored (encrypted)', 'success')} <s-text color="subdued">${c.lastVerifiedAt ? `last verified ${esc(c.lastVerifiedAt)}` : 'not verified yet'}</s-text>${c.loginUrl ? `<br><s-text color="subdued">Org: ${esc(c.loginUrl)}${c.clientId ? ` · client id: ${esc(c.clientId)}` : ''}</s-text>` : ''}`
+    : badge('not set', 'caution');
+  const post = (path: string, inner: string) => `<form data-post="${esc(path)}">${inner}</form>`;
+  const act = (value: string) => `<input type="hidden" name="action" value="${esc(value)}">`;
+  return `<s-page heading="Set up">
+<s-section><s-paragraph>${view('/app/api/home', 'Back to home')}</s-paragraph></s-section>
+${note}${connProblem}${problems}
+<s-section heading="Salesforce connection">
+<s-paragraph>${status}</s-paragraph>
+${post('/app/api/connection', `${field('My Domain URL', 'loginUrl', 'placeholder="https://your-domain.my.salesforce.com"')}
+${field('Consumer key (client id)', 'clientId')}
+<s-password-field label="Consumer secret" name="clientSecret" autocomplete="off"></s-password-field>
+<s-button variant="primary" data-submit>${c.stored ? 'Replace connection' : 'Save connection'}</s-button>`)}
+${c.stored ? post('/app/api/verify', '<s-button data-submit>Test connection</s-button>') : ''}
+</s-section>
+<s-section heading="${esc(r.name)}">
+<s-paragraph>Mode: ${mode}</s-paragraph>
+${post('/app/api/recipe', `${act('enable_dry')}<s-button variant="primary" data-submit>Enable in dry-run</s-button>`)}
+${post('/app/api/recipe', `${act('disable')}<s-button tone="critical" data-submit>Kill switch: disable</s-button>`)}
+<s-paragraph><s-text color="subdued">Going live makes the recipe write Leads and Tasks to Salesforce. It needs a stored connection and the exact word LIVE.</s-text></s-paragraph>
+${post('/app/api/recipe', `${act('go_live')}${field('Type LIVE to confirm', 'confirm')}<s-button tone="critical" data-submit>Go live</s-button>`)}
+</s-section></s-page>`;
 }

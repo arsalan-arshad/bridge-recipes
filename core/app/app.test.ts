@@ -570,3 +570,61 @@ test('the embedded /app surface: absent without SHOPIFY_API_KEY; with it, only a
     assert.equal((await fetch(`${url}/healthz`)).status, 200, 'the rest of the service is untouched');
   }, { apiKey: 'APP-CLIENT-ID' });
 });
+
+test('embedded writes end to end: connect, test, dry-run, LIVE, kill switch - real stores, audited with the Shopify user, secrets never stored in the clear', { skip, timeout: 60_000 }, async () => {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const tok = (shop: string) => {
+    const now = Math.floor(Date.now() / 1000);
+    const h = b64({ alg: 'HS256', typ: 'JWT' });
+    const p = b64({ iss: `https://${shop}/admin`, dest: `https://${shop}`, aud: 'APP-CLIENT-ID', exp: now + 60, nbf: now - 5, sub: 'staff-7' });
+    return `${h}.${p}.${createHmac('sha256', SIGNING).update(`${h}.${p}`).digest('base64url')}`;
+  };
+  const NEW_SECRET = 'EMBEDDED-ENTERED-SECRET-123';
+  await withApp(async ({ app, sf, url, schema, key }) => {
+    const NEWSHOP = 'fresh-store.myshopify.com';
+    const call = (shop: string, path: string, body: Record<string, string>) => fetch(`${url}/app/api/${path}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${tok(shop)}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body).toString(),
+    });
+    // The operator set the shop up ("Add a shop" stores a settings row); only then may it use the page.
+    assert.equal((await call(NEWSHOP, 'recipe', { action: 'enable_dry' })).status, 403, 'not set up yet');
+    await app.stores.configs.set(NEWSHOP, R1_ID, { enabled: false, dryRun: true, config: R1_DEFAULT_CONFIG });
+
+    assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm: 'LIVE' })).status, 400, 'no connection yet');
+    // a connection to an org that is not there must FAIL the test (never a canned "works")
+    assert.equal((await call(NEWSHOP, 'connection', { loginUrl: 'http://127.0.0.1:9', clientId: 'CID-0', clientSecret: NEW_SECRET })).status, 200);
+    const failed = await (await call(NEWSHOP, 'verify', {})).text();
+    assert.ok(failed.includes('Connection check failed') && !failed.includes('The Salesforce connection works.') && !failed.includes(NEW_SECRET), failed.slice(0, 300));
+    const saved = await call(NEWSHOP, 'connection', { loginUrl: sf.url, clientId: 'CID-2', clientSecret: NEW_SECRET });
+    assert.equal(saved.status, 200);
+    assert.ok(!(await saved.text()).includes(NEW_SECRET));
+    assert.equal((await app.stores.connections.get(NEWSHOP))?.clientSecret, NEW_SECRET);
+    const verified = await (await call(NEWSHOP, 'verify', {})).text();
+    assert.ok(verified.includes('The Salesforce connection works.'), verified.slice(0, 300));
+    assert.equal((await call(NEWSHOP, 'recipe', { action: 'enable_dry' })).status, 200);
+    assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true]);
+    assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm: 'live' })).status, 400);
+    assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm: 'LIVE' })).status, 200);
+    assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, false]);
+    assert.equal((await call(NEWSHOP, 'recipe', { action: 'disable' })).status, 200);
+    assert.equal((await app.stores.configs.get(NEWSHOP, R1_ID))?.enabled, false);
+    // the other shop was not touched by any of it
+    assert.equal((await app.stores.configs.get(SHOP, R1_ID)), null);
+
+    const p = new pg.Pool({ connectionString: URL, max: 1 });
+    try {
+      const rows = (await p.query(`SELECT action, shop, detail FROM ${schema}.admin_audit ORDER BY id`)).rows;
+      const s_fail_detail = (all: any[]) => { const d = String(all.find((r) => r.action === 'connection_failed')?.detail ?? ''); assert.match(d, / · user staff-7$/); return d; };
+      assert.deepEqual(rows.map((r) => [r.action, r.shop, r.detail]), [
+        ['connection_saved', NEWSHOP, 'user staff-7'], ['connection_failed', NEWSHOP, s_fail_detail(rows)], ['connection_saved', NEWSHOP, 'user staff-7'],
+        ['connection_verified', NEWSHOP, 'user staff-7'], ['recipe_dry_run', NEWSHOP, 'user staff-7'],
+        ['recipe_live', NEWSHOP, 'user staff-7'], ['recipe_disabled', NEWSHOP, 'user staff-7'],
+      ]);
+      const raw = JSON.stringify((await p.query(`SELECT * FROM ${schema}.salesforce_connection WHERE shop = $1`, [NEWSHOP])).rows);
+      assert.ok(!raw.includes(NEW_SECRET), 'the entered secret is encrypted at rest');
+      assert.ok(!JSON.stringify(rows).includes(NEW_SECRET));
+    } finally {
+      await p.end();
+    }
+    assert.ok(key.length === 32);
+  }, { apiKey: 'APP-CLIENT-ID' });
+});
