@@ -114,6 +114,11 @@ export class PostgresComplianceLog {
     const r = await this.pool.query(`SELECT id, at, kind, shop, request_ref, detail FROM ${this.schema}.compliance_log ORDER BY at DESC, id DESC LIMIT $1`, [Math.min(Math.max(n, 1), 200)]);
     return r.rows.map((x) => this.map(x));
   }
+  // One shop's records, newest first (selected in the database, so another shop's volume never hides them).
+  async recentFor(shop: string, n: number): Promise<ComplianceEntry[]> {
+    const r = await this.pool.query(`SELECT id, at, kind, shop, request_ref, detail FROM ${this.schema}.compliance_log WHERE shop = $1 ORDER BY at DESC, id DESC LIMIT $2`, [shop, Math.min(Math.max(n, 1), 200)]);
+    return r.rows.map((x) => this.map(x));
+  }
   async get(id: number): Promise<ComplianceEntry | null> {
     if (!Number.isSafeInteger(id) || id < 1) return null;
     const r = await this.pool.query(`SELECT id, at, kind, shop, request_ref, detail FROM ${this.schema}.compliance_log WHERE id = $1`, [id]);

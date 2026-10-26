@@ -620,6 +620,24 @@ test('embedded writes end to end: connect, test, dry-run, go-live refused, kill 
     assert.ok((await jobsPage.text()).includes('No failed jobs.'));
     assert.equal((await call(NEWSHOP, 'replay', { id: 'all' })).status, 200, 'replay with nothing failed is a harmless no-op');
 
+    // privacy requests: each shop sees only its own records, selected in the database (another shop's volume cannot hide them)
+    const pp = new pg.Pool({ connectionString: URL, max: 1 });
+    try {
+      const ins = (kind: string, shop: string, ref: string, at: string) => pp.query(`INSERT INTO ${schema}.compliance_log (at, kind, shop, request_ref, detail) VALUES ($1, $2, $3, $4, $5)`, [at, kind, shop, ref, { ordersRedacted: 3, salesforceRecordsToReview: ['00Qxx0000099999'] }]);
+      await ins('app/uninstalled', NEWSHOP, 'mine-1', '2026-10-20T10:00:00Z');
+      for (let i = 0; i < 205; i++) await ins('customers/redact', SHOP, `busy-${i}`, `2026-10-26T10:00:00Z`);
+      const mineHtml = await (await fetch(`${url}/app/api/privacy`, { headers: { Authorization: `Bearer ${tok(NEWSHOP)}` } })).text();
+      assert.ok(mineHtml.includes('mine-1') && !mineHtml.includes('busy-'), 'my record is shown even though another shop has 205 newer ones');
+      const rowId = (await pp.query(`SELECT id FROM ${schema}.compliance_log WHERE request_ref = 'busy-0'`)).rows[0].id;
+      const foreign = await (await fetch(`${url}/app/api/privacy?id=${rowId}`, { headers: { Authorization: `Bearer ${tok(NEWSHOP)}` } })).text();
+      assert.ok(!foreign.includes('00Qxx0000099999') && foreign.includes('<s-page heading="Privacy requests">'), "another shop's request id shows nothing");
+      const ownId = (await pp.query(`SELECT id FROM ${schema}.compliance_log WHERE request_ref = 'mine-1'`)).rows[0].id;
+      const detail = await (await fetch(`${url}/app/api/privacy?id=${ownId}`, { headers: { Authorization: `Bearer ${tok(NEWSHOP)}` } })).text();
+      assert.ok(detail.includes('00Qxx0000099999') && detail.includes('ordersRedacted</s-text>: 3'));
+    } finally {
+      await pp.end();
+    }
+
     // going LIVE is not possible from the embedded page, with or without the word and a stored connection
     for (const confirm of ['live', 'LIVE']) assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm })).status, 403);
     assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true], 'still dry-run');

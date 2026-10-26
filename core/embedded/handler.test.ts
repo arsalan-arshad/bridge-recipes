@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createEmbeddedHandler, failedJobsFor, jobsFor } from './handler.ts';
+import { createEmbeddedHandler, failedJobsFor, jobsFor, privacyEntryFor, privacyFor } from './handler.ts';
 import type { EmbeddedData } from './handler.ts';
 import type { ActionDeps } from '../admin/actions.ts';
 import { ConfigValidationError } from '../../recipes/retail-b2b-lead-spotter/validateConfig.ts';
@@ -36,6 +36,8 @@ function fakeData(over: Partial<EmbeddedData> = {}) {
     recent: async (f) => { calls.push(`recent ${JSON.stringify(f)}`); return [entry()]; },
     failedJobs: async (shop) => { calls.push(`failed ${shop}`); return 0; },
     jobs: async (shop) => { calls.push(`jobs ${shop}`); return []; },
+    privacyList: async (shop) => { calls.push(`privacyList ${shop}`); return [{ id: 7, at: '2026-10-28T10:00:00Z', kind: 'shop/redact', requestRef: 'req-7', detail: { ordersRedacted: 4, salesforceRecordsToReview: ['00Qxx0000012345'] } }]; },
+    privacyEntry: async (shop, id) => { calls.push(`privacyEntry ${shop} ${id}`); return id === 7 ? { id: 7, at: '2026-10-28T10:00:00Z', kind: 'shop/redact', requestRef: 'req-7', detail: { ordersRedacted: 4, salesforceRecordsToReview: ['00Qxx0000012345'] } } : null; },
     settingsForm: async (shop) => { calls.push(`settingsForm ${shop}`); return { leadSource: 'Stored', minOrderTotal: '5', requireConsent: true, existingLeadAction: 'update', companyOverride: '', leadOwnerId: '', allowDomains: '', denyDomains: '', freeEmailBlocklist: '' }; },
     ...over,
   };
@@ -545,4 +547,42 @@ test("the failed-jobs list is this shop's jobs only, with look-alike shop names 
   assert.ok(!JSON.stringify(mine).includes('CUSTOMER DATA') && !JSON.stringify(mine).includes('x@y.z'));
   assert.deepEqual(failedJobsFor(all as any, SHOP), 2);
   assert.deepEqual(jobsFor([], SHOP), []);
+});
+
+// ---- privacy requests ------------------------------------------------------------------------------------------------------------------------
+test('privacy page: needs a token; lists the token shop\'s requests; a shop in the query is ignored', async () => {
+  await withServer(async (url, _l, calls) => {
+    assert.equal((await fetch(`${url}/app/api/privacy`)).status, 401);
+    const r = await fetch(`${url}/app/api/privacy?shop=other-shop.myshopify.com`, { headers: bearer(token()) });
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.ok(html.includes('Shop data erased') && html.includes('req-7'));
+    assert.deepEqual(calls.filter((c) => c.startsWith('privacy')), [`privacyList ${SHOP}`]);
+    assert.equal((await post(url, '/app/api/privacy', {})).status, 405, 'read only');
+    assert.equal((await fetch(`${url}/app/api/privacy`, { method: 'PUT', headers: { ...bearer(token()), ...FORM }, body: '' })).headers.get('allow'), 'GET');
+  });
+});
+
+test('privacy details: ?id= shows that request only when it is this shop\'s; anything else falls back to the list', async () => {
+  await withServer(async (url, _l, calls) => {
+    const own = await (await fetch(`${url}/app/api/privacy?id=7&shop=other-shop.myshopify.com`, { headers: bearer(token()) })).text();
+    assert.ok(own.includes('00Qxx0000012345') && own.includes('Back to privacy requests'));
+    assert.deepEqual(calls.filter((c) => c.startsWith('privacyEntry')), [`privacyEntry ${SHOP} 7`]);
+    for (const id of ['8', '0', '-1', 'abc', '7.5', '7 ', '99999999999999', '1e3', '%00', "7'; --"]) {
+      const html = await (await fetch(`${url}/app/api/privacy?id=${encodeURIComponent(id)}`, { headers: bearer(token()) })).text();
+      assert.ok(!html.includes('00Qxx0000012345') && html.includes('<s-page heading="Privacy requests">'), JSON.stringify(id));
+    }
+  });
+});
+
+test('privacy scoping: only this shop\'s records, look-alike shop names kept apart, only the fields the page needs', () => {
+  const e = (id: number, shop: string) => ({ id, at: 't', kind: 'shop/redact', shop, requestRef: `r${id}`, detail: { n: id }, extra: 'must not pass' });
+  const all = [e(1, SHOP), e(2, 'other-shop.myshopify.com'), e(3, `${SHOP}.evil.io`), e(4, `x${SHOP}`), e(5, SHOP)];
+  const mine = privacyFor(all as any, SHOP);
+  assert.deepEqual(mine.map((x) => x.id), [1, 5]);
+  assert.deepEqual(Object.keys(mine[0]).sort(), ['at', 'detail', 'id', 'kind', 'requestRef']);
+  assert.equal(privacyEntryFor(all[0] as any, SHOP)?.id, 1);
+  for (const foreign of [all[1], all[2], all[3]]) assert.equal(privacyEntryFor(foreign as any, SHOP), null);
+  assert.equal(privacyEntryFor(null, SHOP), null);
+  assert.deepEqual(privacyFor([], SHOP), []);
 });

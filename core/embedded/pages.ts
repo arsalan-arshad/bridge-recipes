@@ -37,7 +37,7 @@ function decisionsTable(entries: LogEntry[], full: boolean): string {
       : `<s-table-cell>${esc(e.at)}</s-table-cell><s-table-cell>${outcome}</s-table-cell><s-table-cell><s-text type="code">${esc(e.objectId)}</s-text></s-table-cell><s-table-cell>${why}</s-table-cell>`;
     return `<s-table-row>${cells}</s-table-row>`;
   }).join('');
-  if (entries.length === 0) return '<s-paragraph>No decisions yet.</s-paragraph>';
+  if (entries.length === 0) return '<s-paragraph>No decisions yet. When a paid order arrives, each decision the recipe makes appears here.</s-paragraph>';
   return `<s-table><s-table-header-row>${head}</s-table-header-row><s-table-body>${rows}</s-table-body></s-table>`;
 }
 
@@ -82,12 +82,13 @@ export function homeFragment(d: HomeData): string {
   const operator = '<s-link href="/admin" target="_blank">operator admin page</s-link>';
 
   return `<s-page heading="Bridge Recipes">${banner}
+${onboardingCard(d)}
 <s-section heading="Setup">
 <s-paragraph>Salesforce connection: ${conn}</s-paragraph>
 <s-paragraph>${esc(r.name)}: ${mode}</s-paragraph>
 <s-paragraph>Failed jobs: ${failed}</s-paragraph>
 <s-paragraph><s-text color="subdued">${next ? `${esc(next)} ` : ''}Going live is done from the ${operator}.</s-text></s-paragraph>
-<s-paragraph>${view('/app/api/setup', 'Set up Salesforce and the recipe', 'primary')} ${view('/app/api/settings', 'Recipe settings')} ${view('/app/api/jobs', d.failedJobs === 0 ? 'Failed jobs' : `Failed jobs (${d.failedJobs})`)}</s-paragraph>
+<s-paragraph>${view('/app/api/setup', 'Set up Salesforce and the recipe', 'primary')} ${view('/app/api/settings', 'Recipe settings')} ${view('/app/api/jobs', d.failedJobs === 0 ? 'Failed jobs' : `Failed jobs (${d.failedJobs})`)} ${view('/app/api/privacy', 'Privacy requests')}</s-paragraph>
 </s-section>
 <s-section heading="Latest decisions">
 ${d.recent.length === 0 ? '<s-paragraph>No orders have been processed for this store yet.</s-paragraph>' : `<s-paragraph>Last ${d.recent.length} decision${d.recent.length === 1 ? '' : 's'}: ${countBadges}</s-paragraph>${decisionsTable(d.recent.slice(0, 5), false)}`}
@@ -247,4 +248,73 @@ export function jobsFragment(d: JobsData): string {
 ${note}${problems}
 <s-section padding="none">${table}</s-section>
 <s-section><s-paragraph><s-text color="subdued">These jobs failed after all retries. Replaying moves a job back to the queue (for example after fixing the Salesforce connection). The order payload is kept for 14 days and is never shown here. You can only replay this store's jobs.</s-text></s-paragraph>${all}</s-section></s-page>`;
+}
+
+// ---- first-run guide: what is left to do before the recipe is working (shown on the home page) ----------------------------------------------
+
+export interface OnboardingStep {
+  label: string;
+  done: boolean;
+  view?: string; // where to go to do it (one of our pages); absent when nothing can be clicked
+  button?: string;
+  hint?: string;
+}
+
+export function onboardingSteps(d: HomeData): OnboardingStep[] {
+  return [
+    { label: 'Connect Salesforce', done: d.connection.stored, view: '/app/api/setup', button: 'Connect' },
+    { label: 'Test the connection', done: d.connection.stored && d.connection.lastVerifiedAt !== null, view: '/app/api/setup', button: 'Test' },
+    { label: 'Turn the recipe on in dry-run (it logs what it would do and writes nothing)', done: d.recipe.enabled, view: '/app/api/setup', button: 'Turn on' },
+    { label: 'See the first decision', done: d.recent.length > 0, hint: 'Place a paid test order in this store; the decision appears under Latest decisions.' },
+  ];
+}
+
+function onboardingCard(d: HomeData): string {
+  const steps = onboardingSteps(d);
+  if (steps.every((s) => s.done)) {
+    return `<s-banner tone="success" heading="Setup complete">The app is set up and has processed at least one order. Going live (writing to Salesforce) is optional and is done from the operator admin page.</s-banner>`;
+  }
+  const rows = steps.map((s) => `<s-paragraph>${badge(s.done ? 'done' : 'to do', s.done ? 'success' : 'caution')} ${esc(s.label)}${s.done ? '' : `${s.view ? ` ${view(s.view, s.button ?? 'Open')}` : ''}${s.hint ? ` <s-text color="subdued">${esc(s.hint)}</s-text>` : ''}`}</s-paragraph>`).join('\n');
+  return `<s-section heading="Get started">\n${rows}\n</s-section>`;
+}
+
+// ---- privacy requests: what Shopify asked us to delete or report for THIS store, and what was done ----------------------------------------------
+
+const KIND_TEXT: Record<string, string> = {
+  'customers/redact': 'Customer data deleted',
+  'customers/data_request': 'Customer data report',
+  'shop/redact': 'Shop data erased',
+  'app/uninstalled': 'App uninstalled',
+};
+const kindText = (kind: string) => (Object.hasOwn(KIND_TEXT, kind) ? KIND_TEXT[kind] : kind);
+
+export interface PrivacyEntry {
+  id: number;
+  at: string;
+  kind: string;
+  requestRef: string;
+  detail: Record<string, unknown>;
+}
+
+export function privacyFragment(d: { shop: string; entries: PrivacyEntry[] }): string {
+  const rows = d.entries.map((e) => `<s-table-row><s-table-cell>${esc(e.at)}</s-table-cell><s-table-cell>${esc(kindText(e.kind))}<br><s-text type="code">${esc(e.kind)}</s-text></s-table-cell><s-table-cell><s-text type="code">${esc(e.requestRef)}</s-text></s-table-cell><s-table-cell>${view(`/app/api/privacy?id=${e.id}`, 'Details')}</s-table-cell></s-table-row>`).join('');
+  const table = d.entries.length === 0
+    ? '<s-paragraph>No privacy requests yet. Shopify sends one when a customer asks for their data or deletion, and another when the app is uninstalled. Each is handled automatically and recorded here.</s-paragraph>'
+    : `<s-table><s-table-header-row><s-table-header>When (UTC)</s-table-header><s-table-header>What happened</s-table-header><s-table-header>Request</s-table-header><s-table-header></s-table-header></s-table-header-row><s-table-body>${rows}</s-table-body></s-table>`;
+  return `<s-page heading="Privacy requests">
+<s-section><s-paragraph>${view('/app/api/home', 'Back to home')}</s-paragraph></s-section>
+<s-section padding="none">${table}</s-section>
+<s-section><s-paragraph><s-text color="subdued">This record contains no personal data. It shows only this store's requests.</s-text></s-paragraph></s-section></s-page>`;
+}
+
+export function privacyDetailFragment(e: PrivacyEntry): string {
+  const records: string[] = Array.isArray(e.detail.salesforceRecordsToReview) ? e.detail.salesforceRecordsToReview.map(String).slice(0, 500) : [];
+  // Only plain numbers and yes/no values from the record are shown, never free text.
+  const facts = Object.entries(e.detail).filter(([, v]) => typeof v === 'number' || typeof v === 'boolean').slice(0, 30);
+  const factRows = facts.map(([k, v]) => `<s-paragraph><s-text color="subdued">${esc(k)}</s-text>: ${esc(v)}</s-paragraph>`).join('');
+  return `<s-page heading="${esc(kindText(e.kind))}">
+<s-section><s-paragraph>${view('/app/api/privacy', 'Back to privacy requests')}</s-paragraph></s-section>
+<s-section heading="Request"><s-paragraph>${esc(e.at)} · request <s-text type="code">${esc(e.requestRef)}</s-text></s-paragraph>${factRows}</s-section>
+${records.length ? `<s-section heading="Salesforce records to review"><s-paragraph><s-text color="subdued">This app cannot delete in Salesforce (it has no delete permission, by design). These Leads and Tasks were written for the orders concerned; review or delete them in Salesforce if your data-protection duties require it.</s-text></s-paragraph><s-paragraph>${records.map((r) => `<s-text type="code">${esc(r)}</s-text>`).join(' ')}</s-paragraph></s-section>` : ''}
+</s-page>`;
 }

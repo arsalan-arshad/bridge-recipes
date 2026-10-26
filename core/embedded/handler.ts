@@ -8,6 +8,7 @@
 //   GET /app/api/setup       HTML fragment (Salesforce connection and recipe controls)
 //   GET /app/api/settings    HTML fragment (the recipe's settings form); POST /app/api/settings saves it
 //   GET /app/api/jobs        HTML fragment (this shop's failed jobs); POST /app/api/replay replays them (own jobs only)
+//   GET /app/api/privacy     HTML fragment (this shop's privacy requests; ?id=N for one request's details)
 //   POST /app/api/connection | /verify | /recipe   the write actions (core/admin/actions.ts), form-encoded body, same auth.
 //                            Going LIVE is deliberately NOT available here (owner decision 2026-10-27): a `go_live` request is refused with
 //                            403 and nothing is written; it needs the operator password on /admin.
@@ -23,8 +24,8 @@ import { esc } from '../admin/html.ts';
 import { FormError, MAX_FORM_BYTES, parseForm } from '../admin/forms.ts';
 import { recipeAction, saveConfig, saveConnection, verifyConnection } from '../admin/actions.ts';
 import type { ActionDeps, ActionOutcome } from '../admin/actions.ts';
-import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, jobsFragment, logFragment, settingsFragment, setupFragment } from './pages.ts';
-import type { HomeData, JobView, SetupData } from './pages.ts';
+import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, jobsFragment, logFragment, privacyDetailFragment, privacyFragment, settingsFragment, setupFragment } from './pages.ts';
+import type { HomeData, JobView, PrivacyEntry, SetupData } from './pages.ts';
 import { selectReplayIds } from './replay.ts';
 import { SHOP_PATTERN, verifySessionToken } from './token.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
@@ -43,6 +44,8 @@ export interface EmbeddedData {
   failedJobs(shop: string): Promise<number>;
   jobs(shop: string): Promise<JobView[]>; // this shop's failed jobs only
   settingsForm(shop: string): Promise<Record<string, string | boolean>>; // the stored settings as form values
+  privacyList(shop: string): Promise<PrivacyEntry[]>; // this shop's compliance records only
+  privacyEntry(shop: string, id: number): Promise<PrivacyEntry | null>; // null unless the record belongs to this shop
 }
 
 // Failed jobs are listed for every shop; each shop's page counts only its own.
@@ -53,6 +56,15 @@ export function failedJobsFor(jobs: { shop: string }[], shop: string): number {
 // The failed-jobs page shows this shop's jobs only, and only the fields it needs (never a payload).
 export function jobsFor(jobs: { id: string; shop: string; topic: string; businessKey: string; webhookId: string; deadAt: string }[], shop: string): JobView[] {
   return jobs.filter((j) => j.shop === shop).map(({ id, topic, businessKey, webhookId, deadAt }) => ({ id, topic, businessKey, webhookId, deadAt }));
+}
+
+// Compliance records are kept for every shop; each shop sees only its own (exact shop match), and only the fields the page needs.
+export function privacyFor(entries: { id: number; at: string; kind: string; shop: string; requestRef: string; detail: Record<string, unknown> }[], shop: string): PrivacyEntry[] {
+  return entries.filter((e) => e.shop === shop).map(({ id, at, kind, requestRef, detail }) => ({ id, at, kind, requestRef, detail }));
+}
+
+export function privacyEntryFor(entry: { id: number; at: string; kind: string; shop: string; requestRef: string; detail: Record<string, unknown> } | null, shop: string): PrivacyEntry | null {
+  return entry !== null && entry.shop === shop ? privacyFor([entry], shop)[0] : null;
 }
 
 export interface EmbeddedDeps {
@@ -94,11 +106,11 @@ function shell(clientId: string): string {
 <script src="/app/assets/app.js"></script></body></html>`;
 }
 
-type Route = 'home' | 'log' | 'setup' | 'settings' | 'jobs' | 'connection' | 'verify' | 'recipe' | 'settings_save' | 'replay';
-const READS = new Set<string>(['home', 'log', 'setup', 'settings', 'jobs']);
+type Route = 'home' | 'log' | 'setup' | 'settings' | 'jobs' | 'privacy' | 'connection' | 'verify' | 'recipe' | 'settings_save' | 'replay';
+const READS = new Set<string>(['home', 'log', 'setup', 'settings', 'jobs', 'privacy']);
 // path -> the route for each allowed method; any other method is 405 with Allow listing these
 const ROUTES: Record<string, { GET?: Route; POST?: Route }> = {
-  '/app/api/home': { GET: 'home' }, '/app/api/log': { GET: 'log' }, '/app/api/setup': { GET: 'setup' }, '/app/api/jobs': { GET: 'jobs' },
+  '/app/api/home': { GET: 'home' }, '/app/api/log': { GET: 'log' }, '/app/api/setup': { GET: 'setup' }, '/app/api/jobs': { GET: 'jobs' }, '/app/api/privacy': { GET: 'privacy' },
   '/app/api/settings': { GET: 'settings', POST: 'settings_save' },
   '/app/api/connection': { POST: 'connection' }, '/app/api/verify': { POST: 'verify' }, '/app/api/recipe': { POST: 'recipe' }, '/app/api/replay': { POST: 'replay' },
 };
@@ -148,6 +160,14 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
     if (route === 'setup') return setupFragment(await setupData(shop));
     if (route === 'settings') return settingsFragment({ shop, form: await deps.data.settingsForm(shop) });
     if (route === 'jobs') return jobsFragment({ shop, jobs: await deps.data.jobs(shop) });
+    if (route === 'privacy') {
+      const asked = query.get('id');
+      if (asked !== null && /^[0-9]{1,12}$/.test(asked)) {
+        const entry = await deps.data.privacyEntry(shop, Number(asked));
+        if (entry) return privacyDetailFragment(entry);
+      }
+      return privacyFragment({ shop, entries: await deps.data.privacyList(shop) }); // unknown, foreign or malformed ids show the list
+    }
     const asked = query.get('outcome') ?? '';
     const outcome = LOG_OUTCOMES.includes(asked) ? asked : ''; // anything else means "all"
     const n = Number(query.get('page') ?? '1');
