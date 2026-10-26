@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createEmbeddedHandler } from './handler.ts';
+import { createEmbeddedHandler, failedJobsFor } from './handler.ts';
+import type { EmbeddedData } from './handler.ts';
+import type { LogEntry } from '../worker/syncLog.ts';
 
 const SECRET = 'test-client-secret';
 const ID = 'client-id-1234';
@@ -18,10 +20,27 @@ function token(over: Record<string, unknown> = {}, secret = SECRET): string {
   return `${h}.${p}.${createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url')}`;
 }
 
-async function withServer(fn: (url: string, logs: string[]) => Promise<void>, opts: { known?: (s: string) => Promise<boolean> } = {}) {
+const entry = (over: Partial<LogEntry> = {}): LogEntry => ({
+  at: '2026-10-26T11:04:43.489Z', shop: SHOP, objectId: 'gid://shopify/Order/1', webhookId: 'wh-1', outcome: 'dry_run', dryRun: true,
+  reason: undefined, ops: [{ kind: 'createLead', outcome: 'planned' }], ...over,
+} as LogEntry);
+
+function fakeData(over: Partial<EmbeddedData> = {}) {
+  const calls: string[] = [];
+  const data: EmbeddedData = {
+    summary: async (shop) => { calls.push(`summary ${shop}`); return { connection: { stored: true, lastVerifiedAt: '2026-10-26T10:00:00Z' }, recipe: { name: 'R1', configured: true, enabled: true, dryRun: true } }; },
+    recent: async (f) => { calls.push(`recent ${JSON.stringify(f)}`); return [entry()]; },
+    failedJobs: async (shop) => { calls.push(`failed ${shop}`); return 0; },
+    ...over,
+  };
+  return { data, calls };
+}
+
+async function withServer(fn: (url: string, logs: string[], calls: string[]) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData> } = {}) {
   const logs: string[] = [];
+  const { data, calls } = fakeData(opts.data);
   const handle = createEmbeddedHandler({
-    clientId: ID, clientSecret: SECRET, now: () => NOW,
+    clientId: ID, clientSecret: SECRET, now: () => NOW, data,
     knownShop: opts.known ?? (async (s) => s === SHOP),
     log: (_l, event, fields) => logs.push(`${event} ${JSON.stringify(fields ?? {})}`),
   });
@@ -30,7 +49,7 @@ async function withServer(fn: (url: string, logs: string[]) => Promise<void>, op
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   try {
-    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, logs);
+    await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, logs, calls);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
@@ -110,8 +129,60 @@ test('a valid token for a known shop gets the fragment naming the shop, and no c
     assert.equal(r.status, 200);
     assert.match(r.headers.get('content-type') ?? '', /^text\/html/);
     assert.equal(r.headers.get('set-cookie'), null);
-    assert.ok((await r.text()).includes(`<s-text type="strong">${SHOP}</s-text>`));
+    const html = await r.text();
+    assert.ok(html.includes('<s-page heading="Bridge Recipes">') && html.includes('DRY-RUN'));
   });
+});
+
+test('the pages are built for the shop in the TOKEN: a shop in the query string is ignored', async () => {
+  await withServer(async (url, _logs, calls) => {
+    for (const path of ['/app/api/home?shop=other-shop.myshopify.com', '/app/api/log?shop=other-shop.myshopify.com&outcome=failed']) {
+      const r = await fetch(`${url}${path}`, { headers: bearer(token()) });
+      assert.equal(r.status, 200, path);
+    }
+    assert.ok(calls.length >= 4 && calls.every((c) => !c.includes('other-shop')), calls.join(' | '));
+    assert.ok(calls.every((c) => c.includes(SHOP)), calls.join(' | '));
+  });
+});
+
+test('log: outcome and page come from a fixed list and bounds; anything else means all / page 1', async () => {
+  await withServer(async (url, _logs, calls) => {
+    const get = (q: string) => fetch(`${url}/app/api/log${q}`, { headers: bearer(token()) });
+    await get('?outcome=failed&page=3');
+    await get("?outcome='%20OR%201=1&page=abc");
+    await get('?outcome=failed&page=-1');
+    await get('?page=999999');
+    await get('?page=2.5');
+    const recents = calls.filter((c) => c.startsWith('recent ')).map((c) => JSON.parse(c.slice(7)));
+    assert.deepEqual(recents[0], { shop: SHOP, outcome: 'failed', limit: 51, offset: 100 });
+    assert.deepEqual(recents[1], { shop: SHOP, limit: 51, offset: 0 }, 'an unknown outcome is not passed on');
+    assert.deepEqual(recents[2], { shop: SHOP, outcome: 'failed', limit: 51, offset: 0 });
+    assert.deepEqual(recents[3], { shop: SHOP, limit: 51, offset: 0 });
+    assert.deepEqual(recents[4], { shop: SHOP, limit: 51, offset: 0 });
+  });
+});
+
+test('log: paging shows Older only when there is another page, and never more than a page of rows', async () => {
+  const many = Array.from({ length: 51 }, (_, i) => entry({ objectId: `gid://shopify/Order/${i}` }));
+  await withServer(async (url) => {
+    const html = await (await fetch(`${url}/app/api/log`, { headers: bearer(token()) })).text();
+    assert.equal(html.split('<s-table-row>').length - 1, 50);
+    assert.ok(html.includes('data-view="/app/api/log?page=2"'));
+    assert.ok(!html.includes('Newer'));
+  }, { data: { recent: async () => many } });
+  await withServer(async (url) => {
+    const html = await (await fetch(`${url}/app/api/log?page=2`, { headers: bearer(token()) })).text();
+    assert.ok(html.includes('data-view="/app/api/log"') && html.includes('Newer') && !html.includes('Older'));
+  }, { data: { recent: async () => [entry()] } });
+});
+
+test('a failing data read gives a bare 500 and logs only the route', async () => {
+  await withServer(async (url, logs) => {
+    const r = await fetch(`${url}/app/api/home`, { headers: bearer(token()) });
+    assert.equal(r.status, 500);
+    assert.equal(await r.text(), 'error');
+    assert.deepEqual(logs, ['embedded_data_failed {"route":"home"}']);
+  }, { data: { failedJobs: async () => { throw new Error('secret db detail'); } } });
 });
 
 test('a valid token for a shop we do not know gets 403 and the shop is logged, nothing else', async () => {
@@ -137,8 +208,18 @@ test('only GET; unknown /app paths are 404; other paths are left to the rest of 
     assert.equal((await fetch(`${url}/app?shop=${SHOP}`, { method: 'POST' })).status, 405);
     assert.equal((await fetch(`${url}/app/nothing`)).status, 404);
     assert.equal((await fetch(`${url}/app/api/other`, { headers: bearer(token()) })).status, 404);
+    assert.equal((await fetch(`${url}/app/api/log`, { method: 'POST', headers: bearer(token()) })).status, 405);
+    assert.equal((await fetch(`${url}/app/api/log`)).status, 401, 'the log needs a token too');
     assert.equal((await fetch(`${url}/application`)).status, 418, '/application is not /app');
     assert.equal((await fetch(`${url}/admin`)).status, 418);
     assert.equal((await fetch(`${url}/webhooks/shopify`, { method: 'POST' })).status, 418);
   });
+});
+
+test('failed jobs are counted per shop, never across shops', () => {
+  const jobs = [{ shop: SHOP }, { shop: 'other-shop.myshopify.com' }, { shop: SHOP }, { shop: 'demo-shop.myshopify.com.evil.io' }];
+  assert.equal(failedJobsFor(jobs, SHOP), 2);
+  assert.equal(failedJobsFor(jobs, 'other-shop.myshopify.com'), 1);
+  assert.equal(failedJobsFor(jobs, 'nobody.myshopify.com'), 0);
+  assert.equal(failedJobsFor([], SHOP), 0);
 });

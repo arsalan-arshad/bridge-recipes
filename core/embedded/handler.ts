@@ -3,7 +3,9 @@
 //   GET /app                 unauthenticated shell: shop domain only, no data (Shopify: never put protected data in the
 //                            HTML sent before the token is verified)
 //   GET /app/assets/app.js   the small browser script
-//   GET /app/api/home        HTML fragment, needs `Authorization: Bearer <ID token>`
+//   GET /app/api/home        HTML fragment (setup status + latest decisions), needs `Authorization: Bearer <ID token>`
+//   GET /app/api/log         HTML fragment (decision log, ?outcome= & ?page=), same auth
+// The shop is ALWAYS the one in the verified token; a `shop` in the query string of an API call is never read.
 //
 // No cookies: the ID token is the credential and App Bridge gives a fresh one per request. A bad token gets 401 plus
 // X-Shopify-Retry-Invalid-Session-Request so App Bridge fetches a new one; a valid token for a shop we do not know gets 403.
@@ -11,7 +13,10 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { esc } from '../admin/html.ts';
+import { HOME_SAMPLE, LOG_OUTCOMES, PAGE_SIZE, homeFragment, logFragment } from './pages.ts';
+import type { HomeData } from './pages.ts';
 import { SHOP_PATTERN, verifySessionToken } from './token.ts';
+import type { LogEntry } from '../worker/syncLog.ts';
 
 // [verify] on the dev store: Shopify's CDN script locations and any extra CSP sources Polaris needs (docs/EMBEDDED_UI.md section 8).
 const APP_BRIDGE = 'https://cdn.shopify.com/shopifycloud/app-bridge.js';
@@ -20,10 +25,23 @@ const ADMIN_HOST = 'https://admin.shopify.com';
 
 const SCRIPT = readFileSync(new globalThis.URL('./assets/app.js', import.meta.url));
 
+// What the pages need, per shop. Read-only: the embedded surface writes nothing in this step.
+export interface EmbeddedData {
+  summary(shop: string): Promise<Pick<HomeData, 'connection' | 'recipe'>>;
+  recent(f: { shop: string; outcome?: string; limit: number; offset: number }): Promise<LogEntry[]>;
+  failedJobs(shop: string): Promise<number>;
+}
+
+// Failed jobs are listed for every shop; each shop's page counts only its own.
+export function failedJobsFor(jobs: { shop: string }[], shop: string): number {
+  return jobs.filter((j) => j.shop === shop).length;
+}
+
 export interface EmbeddedDeps {
   clientId: string; // the app's client id (public): the token's `aud` and the App Bridge meta tag
   clientSecret: string; // the app's client secret: signs the ID token
   knownShop: (shop: string) => Promise<boolean>;
+  data: EmbeddedData;
   now: () => number;
   log?: (level: 'info' | 'error', event: string, fields?: Record<string, unknown>) => void;
 }
@@ -55,13 +73,23 @@ function shell(clientId: string): string {
 <script src="/app/assets/app.js"></script></body></html>`;
 }
 
-function home(shop: string): string {
-  return `<s-page heading="Bridge Recipes"><s-section heading="Connected"><s-paragraph>Signed in through Shopify for <s-text type="strong">${esc(shop)}</s-text>.</s-paragraph>
-<s-paragraph>The setup, log and controls move into this page next; until then use the operator admin page.</s-paragraph></s-section></s-page>`;
-}
-
 export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage, res: ServerResponse) => boolean {
-  async function api(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function render(route: 'home' | 'log', shop: string, query: URLSearchParams): Promise<string> {
+    if (route === 'home') {
+      const [summary, recent, failedJobs] = await Promise.all([
+        deps.data.summary(shop), deps.data.recent({ shop, limit: HOME_SAMPLE, offset: 0 }), deps.data.failedJobs(shop),
+      ]);
+      return homeFragment({ shop, ...summary, recent, failedJobs });
+    }
+    const asked = query.get('outcome') ?? '';
+    const outcome = LOG_OUTCOMES.includes(asked) ? asked : ''; // anything else means "all"
+    const n = Number(query.get('page') ?? '1');
+    const page = Number.isInteger(n) && n >= 1 && n <= 10_000 ? n : 1;
+    const rows = await deps.data.recent({ shop, ...(outcome ? { outcome } : {}), limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE });
+    return logFragment({ shop, outcome, page, entries: rows.slice(0, PAGE_SIZE), hasNext: rows.length > PAGE_SIZE });
+  }
+
+  async function api(req: IncomingMessage, res: ServerResponse, route: 'home' | 'log', query: URLSearchParams): Promise<void> {
     const auth = String(req.headers.authorization ?? '');
     const m = /^Bearer ([A-Za-z0-9._-]+)$/.exec(auth);
     const verdict = verifySessionToken(m ? m[1] : '', { clientSecret: deps.clientSecret, clientId: deps.clientId, nowMs: deps.now() });
@@ -83,7 +111,15 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
       res.writeHead(403, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('forbidden');
       return;
     }
-    res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'" }).end(home(verdict.shop));
+    let html: string;
+    try {
+      html = await render(route, verdict.shop, query);
+    } catch {
+      deps.log?.('error', 'embedded_data_failed', { route });
+      res.writeHead(500, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }).end('error');
+      return;
+    }
+    res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'" }).end(html);
   }
 
   return (req, res) => {
@@ -109,8 +145,8 @@ export function createEmbeddedHandler(deps: EmbeddedDeps): (req: IncomingMessage
       res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }).end(SCRIPT);
       return true;
     }
-    if (path === '/app/api/home') {
-      api(req, res).catch(() => {
+    if (path === '/app/api/home' || path === '/app/api/log') {
+      api(req, res, path === '/app/api/home' ? 'home' : 'log', url.searchParams).catch(() => {
         if (!res.headersSent) res.writeHead(500, BASE_HEADERS);
         res.end();
       });
