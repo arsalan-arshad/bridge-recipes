@@ -140,8 +140,10 @@ test('the pages are built for the shop in the TOKEN: a shop in the query string 
       const r = await fetch(`${url}${path}`, { headers: bearer(token()) });
       assert.equal(r.status, 200, path);
     }
-    assert.ok(calls.length >= 4 && calls.every((c) => !c.includes('other-shop')), calls.join(' | '));
-    assert.ok(calls.every((c) => c.includes(SHOP)), calls.join(' | '));
+    // every data call names the token's shop (shown here as <shop>) and no other shop
+    const normalised = calls.map((c) => c.split(SHOP).join('<shop>'));
+    assert.ok(normalised.length >= 4, normalised.join(' | '));
+    assert.ok(normalised.every((c) => /<shop>/.test(c) && !/myshopify|other-shop/.test(c)), normalised.join(' | '));
   });
 });
 
