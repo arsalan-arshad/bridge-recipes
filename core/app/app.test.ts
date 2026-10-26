@@ -571,7 +571,7 @@ test('the embedded /app surface: absent without SHOPIFY_API_KEY; with it, only a
   }, { apiKey: 'APP-CLIENT-ID' });
 });
 
-test('embedded writes end to end: connect, test, dry-run, LIVE, kill switch - real stores, audited with the Shopify user, secrets never stored in the clear', { skip, timeout: 60_000 }, async () => {
+test('embedded writes end to end: connect, test, dry-run, go-live refused, kill switch - real stores, audited with the Shopify user, secrets never stored in the clear', { skip, timeout: 60_000 }, async () => {
   const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const tok = (shop: string) => {
     const now = Math.floor(Date.now() / 1000);
@@ -589,7 +589,6 @@ test('embedded writes end to end: connect, test, dry-run, LIVE, kill switch - re
     assert.equal((await call(NEWSHOP, 'recipe', { action: 'enable_dry' })).status, 403, 'not set up yet');
     await app.stores.configs.set(NEWSHOP, R1_ID, { enabled: false, dryRun: true, config: R1_DEFAULT_CONFIG });
 
-    assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm: 'LIVE' })).status, 400, 'no connection yet');
     // a connection to an org that is not there must FAIL the test (never a canned "works")
     assert.equal((await call(NEWSHOP, 'connection', { loginUrl: 'http://127.0.0.1:9', clientId: 'CID-0', clientSecret: NEW_SECRET })).status, 200);
     const failed = await (await call(NEWSHOP, 'verify', {})).text();
@@ -602,9 +601,9 @@ test('embedded writes end to end: connect, test, dry-run, LIVE, kill switch - re
     assert.ok(verified.includes('The Salesforce connection works.'), verified.slice(0, 300));
     assert.equal((await call(NEWSHOP, 'recipe', { action: 'enable_dry' })).status, 200);
     assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true]);
-    assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm: 'live' })).status, 400);
-    assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm: 'LIVE' })).status, 200);
-    assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, false]);
+    // going LIVE is not possible from the embedded page, with or without the word and a stored connection
+    for (const confirm of ['live', 'LIVE']) assert.equal((await call(NEWSHOP, 'recipe', { action: 'go_live', confirm })).status, 403);
+    assert.deepEqual(await app.stores.configs.get(NEWSHOP, R1_ID).then((x) => [x?.enabled, x?.dryRun]), [true, true], 'still dry-run');
     assert.equal((await call(NEWSHOP, 'recipe', { action: 'disable' })).status, 200);
     assert.equal((await app.stores.configs.get(NEWSHOP, R1_ID))?.enabled, false);
     // the other shop was not touched by any of it
@@ -617,7 +616,7 @@ test('embedded writes end to end: connect, test, dry-run, LIVE, kill switch - re
       assert.deepEqual(rows.map((r) => [r.action, r.shop, r.detail]), [
         ['connection_saved', NEWSHOP, 'user staff-7'], ['connection_failed', NEWSHOP, s_fail_detail(rows)], ['connection_saved', NEWSHOP, 'user staff-7'],
         ['connection_verified', NEWSHOP, 'user staff-7'], ['recipe_dry_run', NEWSHOP, 'user staff-7'],
-        ['recipe_live', NEWSHOP, 'user staff-7'], ['recipe_disabled', NEWSHOP, 'user staff-7'],
+        ['recipe_disabled', NEWSHOP, 'user staff-7'],
       ]);
       const raw = JSON.stringify((await p.query(`SELECT * FROM ${schema}.salesforce_connection WHERE shop = $1`, [NEWSHOP])).rows);
       assert.ok(!raw.includes(NEW_SECRET), 'the entered secret is encrypted at rest');
