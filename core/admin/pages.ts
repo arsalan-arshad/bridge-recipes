@@ -68,9 +68,9 @@ export function entriesTable(entries: LogEntry[]): string {
     const tone = e.outcome === 'failed' ? 'bad' : e.outcome === 'retry' ? 'warn' : e.outcome === 'created' || e.outcome === 'updated' ? 'ok' : 'mut';
     const ops = (e.ops ?? []).map((o) => `${esc(o.kind)}: ${esc(o.outcome)}${o.sfId ? ` <code>${esc(o.sfId)}</code>` : ''}`).join('<br>');
     const why = [e.reason, e.errorClass, e.errorCode].filter(Boolean).map(esc).join(' · ');
-    return `<tr><td class="mut">${esc(e.at)}</td><td>${badge(e.outcome, tone)}${e.dryRun ? ' <span class="mut">dry-run</span>' : ''}</td><td><code>${esc(e.objectId)}</code></td><td>${why}</td><td>${ops}</td></tr>`;
+    return `<tr><td class="mut">${esc(e.at)}</td><td>${badge(e.outcome, tone)}${e.dryRun ? ' <span class="mut">dry-run</span>' : ''}</td><td><code>${esc(e.objectId)}</code></td><td><code>${esc(e.webhookId)}</code></td><td>${why}</td><td>${ops}</td></tr>`;
   }).join('');
-  return `<table><tr><th>When (UTC)</th><th>Outcome</th><th>Order</th><th>Reason</th><th>Operations</th></tr>${rows || '<tr><td colspan="5" class="mut">No entries.</td></tr>'}</table>`;
+  return `<table><tr><th>When (UTC)</th><th>Outcome</th><th>Order</th><th>Webhook id</th><th>Reason</th><th>Operations</th></tr>${rows || '<tr><td colspan="6" class="mut">No entries.</td></tr>'}</table>`;
 }
 
 export function shopPage(d: {
