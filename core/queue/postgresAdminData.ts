@@ -34,7 +34,19 @@ export class PostgresAudit {
   }
 }
 
-// Every shop the system knows anything about.
+// Has the OPERATOR set this shop up? True only when the shop has a recipe-settings row ("Add a shop" in the admin, or any recipe setting)
+// or a stored Salesforce connection. A shop that merely sent us a webhook (it is in the decision log) is NOT set up: anyone can install a
+// public app, and the embedded page must not open for them.
+export async function isOperatorShop(pool: Pool, schema: string, shop: string): Promise<boolean> {
+  assertSchemaName(schema);
+  const r = await pool.query(
+    `SELECT 1 FROM ${schema}.recipe_config WHERE shop = $1 UNION ALL SELECT 1 FROM ${schema}.salesforce_connection WHERE shop = $1 LIMIT 1`,
+    [shop],
+  );
+  return r.rowCount === 1;
+}
+
+// Every shop the system knows anything about (setup rows AND the log): for the operator's own list, never for access decisions.
 export async function listShops(pool: Pool, schema: string): Promise<string[]> {
   assertSchemaName(schema);
   const r = await pool.query(
