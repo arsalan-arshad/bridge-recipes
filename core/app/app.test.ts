@@ -533,7 +533,21 @@ test('the embedded /app surface: absent without SHOPIFY_API_KEY; with it, only a
     assert.equal((await fetch(`${url}/app?shop=${SHOP}`)).status, 404, 'switched off without the client id');
     assert.equal((await fetch(`${url}/app/api/home`, { headers: { Authorization: `Bearer ${tok(SHOP)}` } })).status, 404);
   });
-  await withApp(async ({ app, url }) => {
+  await withApp(async ({ app, url, deliver }) => {
+    const OTHER = 'second-store.myshopify.com';
+    await app.stores.configs.set(SHOP, R1_ID, { enabled: true, dryRun: true, config: R1_DEFAULT_CONFIG });
+    assert.equal(await deliver({ order: 1 }), 200);
+    assert.equal(await deliver({ order: 2, shop: OTHER }), 200);
+    await until(async () => (await app.stores.syncLog.recent({ limit: 10 })).length === 2);
+    const page = async (shop: string, route: string) => (await fetch(`${url}/app/api/${route}`, { headers: { Authorization: `Bearer ${tok(shop)}` } })).text();
+    const mine = await page(SHOP, 'home');
+    assert.ok(mine.includes('DRY-RUN') && mine.includes('gid://shopify/Order/1') && !mine.includes('gid://shopify/Order/2'), 'a shop sees only its own decisions (home)');
+    const mineLog = await page(SHOP, 'log');
+    assert.ok(mineLog.includes('gid://shopify/Order/1') && !mineLog.includes('gid://shopify/Order/2'), 'and in the log');
+    const theirs = await page(OTHER, 'log');
+    assert.ok(theirs.includes('<s-badge tone="neutral">recipe_disabled</s-badge>') && !theirs.includes('gid://shopify/Order/1') && !theirs.includes('<s-badge tone="neutral">dry_run</s-badge>'), 'the other shop sees only its own (its recipe is off, so its row is recipe_disabled)');
+    assert.ok((await page(OTHER, 'home')).includes('NOT CONFIGURED'), 'a shop with no recipe row is shown as not configured (disabled)');
+
     const shell = await fetch(`${url}/app?shop=${SHOP}`);
     assert.equal(shell.status, 200);
     assert.match(shell.headers.get('content-security-policy') ?? '', /frame-ancestors https:\/\/example-store\.myshopify\.com https:\/\/admin\.shopify\.com/);

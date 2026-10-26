@@ -22,7 +22,7 @@ import { createAdminHandler } from '../admin/handler.ts';
 import { handleLifecycleJob } from '../compliance/handlers.ts';
 import { LIFECYCLE_TOPICS } from '../compliance/topics.ts';
 import { deriveSessionKey } from '../admin/security.ts';
-import { createEmbeddedHandler } from '../embedded/handler.ts';
+import { createEmbeddedHandler, failedJobsFor } from '../embedded/handler.ts';
 import { PostgresAudit, PostgresComplianceLog, createDeadLetters, listShops } from '../queue/postgresAdminData.ts';
 import { verifyShop } from './admin.ts';
 import { configToForm, formToConfig } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
@@ -73,6 +73,8 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       log: (e) => log(e.outcome === 'intake_error' ? 'error' : 'info', 'webhook', { outcome: e.outcome, topic: e.topic, shop: e.shop, webhookId: e.webhookId, ...(e.reason ? { reason: e.reason } : {}) }),
     });
 
+    const dead = createDeadLetters(rt.boss);
+
     // The operator admin UI exists only when ADMIN_PASSWORD is set; otherwise /admin falls through to the 404 below.
     const admin = config.adminPassword === null ? null : createAdminHandler({
       password: config.adminPassword,
@@ -83,7 +85,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       connections, configs, syncLog,
       shops: () => listShops(rt.pool, config.schema),
       verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }),
-      dead: createDeadLetters(rt.boss),
+      dead,
       audit: new PostgresAudit(rt.pool, config.schema, now),
       compliance: new PostgresComplianceLog(rt.pool, config.schema),
       log,
@@ -94,6 +96,17 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       clientId: config.apiKey,
       clientSecret: config.webhookSecret,
       knownShop: async (shop) => (await listShops(rt.pool, config.schema)).includes(shop),
+      data: {
+        summary: async (shop) => {
+          const [settings, conn] = await Promise.all([configs.get(shop, R1_ID), connections.info(shop)]);
+          return {
+            connection: { stored: conn.stored, lastVerifiedAt: conn.lastVerifiedAt },
+            recipe: { name: 'Retail-to-B2B Lead Spotter', configured: settings !== null, enabled: settings?.enabled === true, dryRun: settings?.dryRun !== false },
+          };
+        },
+        recent: (f) => syncLog.recent(f),
+        failedJobs: async (shop) => failedJobsFor(await dead.list(), shop),
+      },
       now: () => now().getTime(),
       log,
     });
