@@ -260,17 +260,24 @@ test('logs never contain the signing secret, the Salesforce secret, the token, t
 
 test('a failed start (port already in use) rejects and leaks no database connections', { skip, timeout: 60_000 }, async () => {
   await withApp(async ({ app }) => {
+    // Count ONLY this test's own connections (unique application_name): other test files use the same database at the same time.
+    const tag = `leak_app_${randomBytes(4).toString('hex')}`;
+    const tagged = new globalThis.URL(URL); // (URL is shadowed by the connection string)
+    tagged.searchParams.set('application_name', tag);
     const probe = new pg.Pool({ connectionString: URL, max: 1 });
-    const open = async () => (await probe.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`)).rows[0].n as number;
-    const before = await open();
+    const count = async () => (await probe.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`, [tag])).rows[0].n as number;
     const schema2 = `bridge_t_${randomBytes(4).toString('hex')}`;
-    const cfg: AppConfig = { databaseUrl: URL, schema: schema2, webhookSecret: SIGNING, encryptionKey: randomBytes(32), host: '127.0.0.1', port: app.port, retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 3000, adminPassword: null };
+    const cfg: AppConfig = { databaseUrl: tagged.toString(), schema: schema2, webhookSecret: SIGNING, encryptionKey: randomBytes(32), host: '127.0.0.1', port: app.port, retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 3000, adminPassword: null, trustProxy: false };
     await assert.rejects(() => createApp(cfg, { log: () => {} }), /EADDRINUSE|address already in use/);
-    await sleep(800);
-    const after = await open();
+    let left = -1;
+    for (let i = 0; i < 20; i++) { // closing is asynchronous: wait for it, up to 4 s
+      left = await count();
+      if (left === 0) break;
+      await sleep(200);
+    }
     await probe.query(`DROP SCHEMA IF EXISTS ${schema2} CASCADE`);
     await probe.end();
-    assert.ok(after <= before, `connections before=${before} after=${after}`);
+    assert.equal(left, 0, `connections still open under the failed start's tag: ${left}`);
   });
 });
 
