@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { homeFragment, jobsFragment, logFragment, logPath, maskKey, settingsFragment, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
+import { homeFragment, jobsFragment, logFragment, logPath, maskKey, onboardingSteps, privacyDetailFragment, privacyFragment, settingsFragment, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
 import type { HomeData, JobsData, SetupData, SettingsData } from './pages.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
@@ -53,6 +53,7 @@ test('home: outcome counts are over what was given, sorted by count, with the ri
 test('home: an empty log says so and shows no table', () => {
   const html = homeFragment(home({ recent: [] }));
   assert.ok(html.includes('No orders have been processed for this store yet.') && !html.includes('<s-table>'));
+  assert.ok(logFragment({ shop: 's', outcome: '', page: 1, entries: [], hasNext: false }).includes('When a paid order arrives, each decision the recipe makes appears here.'));
 });
 
 test('every dynamic value is escaped (log fields, shop, recipe name, times, ids)', () => {
@@ -73,7 +74,7 @@ test('navigation: every data-view is one of our /app/api/ paths and nothing else
   const html = homeFragment(home()) + logFragment({ shop: 's', outcome: 'failed', page: 3, entries: [entry()], hasNext: true });
   const views = [...html.matchAll(/data-view="([^"]*)"/g)].map((m) => m[1].replaceAll('&amp;', '&')); // the browser decodes &amp; in attributes
   assert.ok(views.length > 10);
-  for (const v of views) assert.match(v, /^\/app\/api\/(home|log|setup|settings|jobs)(\?[a-z_=&0-9]*)?$/, v);
+  for (const v of views) assert.match(v, /^\/app\/api\/(home|log|setup|settings|jobs|privacy)(\?[a-z_=&0-9]*)?$/, v);
   assert.ok(!/href="(?!\/admin")/.test(html), 'the only href is the operator admin link');
   assert.ok(html.includes('<s-link href="/admin" target="_blank">'), 'the operator page opens in a new tab (it cannot be framed)');
 });
@@ -212,4 +213,60 @@ test('home: shows a failed-jobs button with the count, and links to settings', (
   assert.ok(homeFragment(home({ failedJobs: 3 })).includes('data-view="/app/api/jobs">Failed jobs (3)</s-button>'));
   assert.ok(homeFragment(home({ failedJobs: 0 })).includes('data-view="/app/api/jobs">Failed jobs</s-button>'));
   assert.ok(homeFragment(home()).includes('data-view="/app/api/settings">Recipe settings</s-button>'));
+});
+
+const fresh = (over: Partial<HomeData> = {}): HomeData => home({ connection: { stored: false, lastVerifiedAt: null }, recipe: { name: 'R', configured: false, enabled: false, dryRun: true }, recent: [], ...over });
+
+test('first-run guide: the steps follow the real state, in order, and only what is left to do has a button', () => {
+  const state = (d: HomeData) => onboardingSteps(d).map((s) => s.done);
+  assert.deepEqual(state(fresh()), [false, false, false, false]);
+  assert.deepEqual(state(fresh({ connection: { stored: true, lastVerifiedAt: null } })), [true, false, false, false]);
+  assert.deepEqual(state(fresh({ connection: { stored: true, lastVerifiedAt: '2026-10-26T10:00:00Z' } })), [true, true, false, false]);
+  assert.deepEqual(state(fresh({ connection: { stored: true, lastVerifiedAt: 'x' }, recipe: { name: 'R', configured: true, enabled: true, dryRun: true } })), [true, true, true, false]);
+  assert.deepEqual(state(fresh({ connection: { stored: false, lastVerifiedAt: 'x' } })), [false, false, false, false], 'a verified time without a stored connection counts for nothing');
+  assert.deepEqual(state(fresh({ recent: [entry()] })), [false, false, false, true]);
+  const html = homeFragment(fresh());
+  assert.ok(html.includes('<s-section heading="Get started">') && html.includes('data-view="/app/api/setup">Connect</s-button>') && html.includes('Place a paid test order'));
+  assert.equal(html.split('<s-badge tone="caution">to do</s-badge>').length - 1, 4);
+  const half = homeFragment(fresh({ connection: { stored: true, lastVerifiedAt: '2026-10-26T10:00:00Z' } }));
+  assert.ok(half.includes('<s-badge tone="success">done</s-badge> Connect Salesforce') && !half.includes('>Connect</s-button>') && !half.includes('>Test</s-button>') && half.includes('>Turn on</s-button>'));
+});
+
+test('first-run guide: when everything is done it becomes a "Setup complete" note and the checklist is gone', () => {
+  const done = home({ recipe: { name: 'R', configured: true, enabled: true, dryRun: true } });
+  const html = homeFragment(done);
+  assert.ok(html.includes('<s-banner tone="success" heading="Setup complete">') && !html.includes('Get started') && !html.includes('to do'));
+  assert.ok(homeFragment(home({ recipe: { name: 'R', configured: true, enabled: true, dryRun: false } })).includes('Setup complete'), 'also when live');
+  assert.ok(!homeFragment(home({ recipe: { name: 'R', configured: true, enabled: false, dryRun: true } })).includes('Setup complete'), 'a disabled recipe is not "complete"');
+});
+
+const priv = (over: Record<string, unknown> = {}) => ({ id: 7, at: '2026-10-28T10:00:00Z', kind: 'shop/redact', requestRef: 'abc-123', detail: { ordersRedacted: 4, salesforceRecordsToReview: ['00Qxx0000012345', '00Txx0000067890'] }, ...over });
+
+test('privacy requests: a table of this shop\'s requests with details links, a clear empty state, and a notice that no personal data is held', () => {
+  const html = privacyFragment({ shop: 's', entries: [priv(), priv({ id: 8, kind: 'app/uninstalled', requestRef: 'r2' })] });
+  assert.ok(html.includes('Shop data erased') && html.includes('App uninstalled') && html.includes('data-view="/app/api/privacy?id=7">Details</s-button>') && html.includes('data-view="/app/api/privacy?id=8">'));
+  assert.ok(html.includes('contains no personal data') && html.includes("only this store's requests"));
+  const none = privacyFragment({ shop: 's', entries: [] });
+  assert.ok(none.includes('No privacy requests yet.') && !none.includes('<s-table>'));
+  const odd = privacyFragment({ shop: 's', entries: [priv({ kind: 'toString' }), priv({ kind: '__proto__' }), priv({ kind: 'constructor' })] });
+  assert.ok(!odd.includes('native code') && !odd.includes('[object') && odd.includes('<s-table-cell>toString<br>') && odd.includes('<s-table-cell>__proto__<br>') && odd.includes('<s-table-cell>constructor<br>'), 'unknown kinds are shown as their own text, never as inherited labels');
+  const hostile = privacyFragment({ shop: 's', entries: [priv({ at: HOSTILE, kind: HOSTILE, requestRef: HOSTILE })] });
+  assert.ok(!hostile.includes('<img') && hostile.includes('&lt;img src=x onerror=alert(1)&gt;'), 'every value in the list is escaped');
+});
+
+test('privacy request details: the records to review and plain numbers only; everything escaped; free text and nested data never shown', () => {
+  const html = privacyDetailFragment(priv());
+  assert.ok(html.includes('00Qxx0000012345') && html.includes('00Txx0000067890') && html.includes('ordersRedacted</s-text>: 4'));
+  assert.ok(html.includes('This app cannot delete in Salesforce'));
+  const odd = privacyDetailFragment(priv({ detail: { note: 'FREE TEXT secret', nested: { email: 'x@y.z' }, count: 2, flag: true, list: ['a'], salesforceRecordsToReview: [HOSTILE] } }));
+  assert.ok(!odd.includes('FREE TEXT') && !odd.includes('x@y.z') && !odd.includes('<img') && odd.includes('count</s-text>: 2') && odd.includes('flag</s-text>: true'));
+  assert.ok(odd.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(!privacyDetailFragment(priv({ detail: {} })).includes('Salesforce records to review'));
+  const many = privacyDetailFragment(priv({ detail: { salesforceRecordsToReview: Array.from({ length: 800 }, (_, i) => `rec${i}`) } }));
+  assert.equal(many.split('<s-text type="code">rec').length - 1, 500, 'capped');
+  assert.ok(!privacyDetailFragment(priv({ requestRef: HOSTILE, at: HOSTILE, kind: HOSTILE })).includes('<img'));
+});
+
+test('home links to privacy requests', () => {
+  assert.ok(homeFragment(home()).includes('data-view="/app/api/privacy">Privacy requests</s-button>'));
 });
