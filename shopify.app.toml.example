@@ -1,14 +1,16 @@
 # Example Shopify app configuration for Bridge Recipes.
 #
 # Copy this file to `shopify.app.toml` (that file is git-ignored on purpose: it carries YOUR app's client id and YOUR
-# host) and fill in the two placeholders below. `shopify app config link` can also write the real file for you.
+# host) and fill in the placeholders below. `shopify app config link` can also write the real file for you.
 # Nothing secret belongs here: the client SECRET stays in the service's SHOPIFY_WEBHOOK_SECRET variable, never in a file.
 # Reference: https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "<your app's client id>"            # from your app in the Shopify Dev Dashboard (not a secret)
 name = "<your app name>"
-application_url = "https://shopify.dev/apps/default-app-home"
-embedded = false
+# The embedded app page lives at /app on your service. It needs SHOPIFY_API_KEY (this client id) set on the service; without it /app
+# does not exist. Only shops you have added to the service can open it. Release it with `shopify app deploy`.
+application_url = "https://<your-host>/app"
+embedded = true
 
 [webhooks]
 api_version = "2026-10"

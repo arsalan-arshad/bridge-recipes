@@ -61,6 +61,9 @@ export function dashboardPage(d: { csrf: string; msg?: string | null; shops: { s
   });
 }
 
+// The outcomes a log can be filtered by (shared with the embedded app's log page).
+export const LOG_OUTCOMES = ['created', 'updated', 'duplicate_detected', 'already_done', 'skipped', 'dry_run', 'recipe_disabled', 'unknown_topic', 'invalid_payload', 'retry', 'failed'];
+
 const modeBadge = (r: RecipeView) => (!r.enabled ? badge(r.configured ? 'DISABLED' : 'not configured (disabled)', 'warn') : r.dryRun ? badge('DRY-RUN', 'ok') : badge('LIVE', 'bad'));
 
 export function entriesTable(entries: LogEntry[]): string {
@@ -120,7 +123,7 @@ ${d.conn.stored ? `<form method="post" action="/admin/shops/${shop}/verify">${cs
 export function logPage(d: { csrf: string; shop: string; entries: LogEntry[]; outcome: string; page: number; hasNext: boolean }): string {
   const shop = esc(d.shop);
   const q = (page: number) => `?page=${page}${d.outcome ? `&outcome=${encodeURIComponent(d.outcome)}` : ''}`;
-  const outcomes = ['', 'created', 'updated', 'duplicate_detected', 'already_done', 'skipped', 'dry_run', 'recipe_disabled', 'unknown_topic', 'invalid_payload', 'retry', 'failed'];
+  const outcomes = ['', ...LOG_OUTCOMES];
   return layout({
     title: `${d.shop} log`,
     csrf: d.csrf,
