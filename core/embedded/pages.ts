@@ -126,7 +126,6 @@ export const NOTICES: Record<string, { tone: 'success' | 'warning'; text: string
   connection_saved: { tone: 'success', text: 'Salesforce connection saved. The secret is stored encrypted and is never shown again. Use "Test connection".' },
   verified_ok: { tone: 'success', text: 'The Salesforce connection works.' },
   enabled_dry: { tone: 'success', text: 'Recipe enabled in DRY-RUN: it reads from Salesforce and logs what it would do, but writes nothing.' },
-  live: { tone: 'warning', text: 'Recipe is now LIVE: it writes Leads and Tasks to Salesforce.' },
   disabled: { tone: 'warning', text: 'Recipe disabled (kill switch): no Salesforce calls from the next job on.' },
 };
 
@@ -168,7 +167,6 @@ ${c.stored ? post('/app/api/verify', '<s-button data-submit>Test connection</s-b
 <s-paragraph>Mode: ${mode}</s-paragraph>
 ${post('/app/api/recipe', `${act('enable_dry')}<s-button variant="primary" data-submit>Enable in dry-run</s-button>`)}
 ${post('/app/api/recipe', `${act('disable')}<s-button tone="critical" data-submit>Kill switch: disable</s-button>`)}
-<s-paragraph><s-text color="subdued">Going live makes the recipe write Leads and Tasks to Salesforce. It needs a stored connection and the exact word LIVE.</s-text></s-paragraph>
-${post('/app/api/recipe', `${act('go_live')}${field('Type LIVE to confirm', 'confirm')}<s-button tone="critical" data-submit>Go live</s-button>`)}
+<s-paragraph><s-text color="subdued">Going live (writing Leads and Tasks to Salesforce) is not done from here: it needs the operator password, on the <s-link href="/admin" target="_blank">operator admin page</s-link>. From here you can connect, test, run in dry-run, and switch the recipe off.</s-text></s-paragraph>
 </s-section></s-page>`;
 }

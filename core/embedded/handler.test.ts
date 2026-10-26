@@ -315,25 +315,34 @@ test('connection: a bad one is refused with the problem shown, nothing is stored
   });
 });
 
-test('go live: the exact word LIVE and a stored connection are both required; every step is audited with the user', async () => {
-  await withServer(async (url, _l, _c, w) => {
-    const go = (confirm: string) => post(url, '/app/api/recipe', { action: 'go_live', confirm });
-    for (const c of ['', 'live', 'LIVE ', 'yes']) assert.equal((await go(c)).status, 400, JSON.stringify(c));
-    const noConn = await go('LIVE');
-    assert.equal(noConn.status, 400);
-    assert.ok((await noConn.text()).includes('connect Salesforce first'));
-    assert.equal(w.settings.size, 0, 'nothing written');
-    assert.deepEqual(w.audits, []);
+test('go live is NOT available from the embedded page: refused with 403 whatever is sent, nothing written or audited; the safe actions still work', async () => {
+  await withServer(async (url, logs, _c, w) => {
     await post(url, '/app/api/connection', { loginUrl: 'https://acme.my.salesforce.com', clientId: 'K', clientSecret: 'S' });
-    const live = await go('LIVE');
-    assert.equal(live.status, 200);
-    assert.deepEqual(w.settings.get(`${SHOP}|R`), { enabled: true, dryRun: false, config: { minOrderTotal: 0 } });
-    assert.deepEqual(w.audits.map((a) => [a.action, a.detail]), [['connection_saved', 'user 42'], ['recipe_live', 'user 42']]);
-    await post(url, '/app/api/recipe', { action: 'disable' });
-    assert.equal(w.settings.get(`${SHOP}|R`)?.enabled, false);
+    for (const body of [{ action: 'go_live', confirm: 'LIVE' }, { action: 'go_live' }, { action: 'go_live', confirm: 'live' }, { action: 'go_live', confirm: 'LIVE', extra: 'x' }]) {
+      const r = await post(url, '/app/api/recipe', body);
+      assert.equal(r.status, 403, JSON.stringify(body));
+      const html = await r.text();
+      assert.ok(html.includes('Going live is done from the operator admin page') && html.includes('heading="Not done"'));
+    }
+    assert.equal(w.settings.size, 0, 'a refused go-live writes nothing');
+    assert.deepEqual(w.audits.map((a) => a.action), ['connection_saved'], 'and is not recorded as a change');
+    assert.ok(logs.filter((l) => l.startsWith('embedded_go_live_refused')).length === 4);
     await post(url, '/app/api/recipe', { action: 'enable_dry' });
     assert.deepEqual([w.settings.get(`${SHOP}|R`)?.enabled, w.settings.get(`${SHOP}|R`)?.dryRun], [true, true]);
-    assert.deepEqual(w.audits.map((a) => a.action), ['connection_saved', 'recipe_live', 'recipe_disabled', 'recipe_dry_run']);
+    await post(url, '/app/api/recipe', { action: 'disable' });
+    assert.equal(w.settings.get(`${SHOP}|R`)?.enabled, false);
+    assert.deepEqual(w.audits.map((a) => [a.action, a.detail]), [['connection_saved', 'user 42'], ['recipe_dry_run', 'user 42'], ['recipe_disabled', 'user 42']]);
+  });
+});
+
+test('the kill switch and dry-run work on a recipe that is already LIVE (set from the operator page); the mode goes back to dry-run, never forward', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    w.settings.set(`${SHOP}|R`, { enabled: true, dryRun: false, config: { minOrderTotal: 9 } });
+    await post(url, '/app/api/recipe', { action: 'enable_dry' });
+    assert.deepEqual(w.settings.get(`${SHOP}|R`), { enabled: true, dryRun: true, config: { minOrderTotal: 9 } });
+    w.settings.set(`${SHOP}|R`, { enabled: true, dryRun: false, config: { minOrderTotal: 9 } });
+    await post(url, '/app/api/recipe', { action: 'disable' });
+    assert.deepEqual(w.settings.get(`${SHOP}|R`), { enabled: false, dryRun: false, config: { minOrderTotal: 9 } });
   });
 });
 
