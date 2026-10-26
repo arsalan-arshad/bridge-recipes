@@ -33,3 +33,7 @@ Thumbs.db
 
 # One-time webhook captures from a dev store (contain test customer data)
 captures/
+
+# Your Shopify app's real configuration (client id and host); copy shopify.app.toml.example instead
+shopify.app.toml
+.shopify/
