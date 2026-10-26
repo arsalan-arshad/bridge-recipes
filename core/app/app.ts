@@ -23,7 +23,7 @@ import { handleLifecycleJob } from '../compliance/handlers.ts';
 import { LIFECYCLE_TOPICS } from '../compliance/topics.ts';
 import { deriveSessionKey } from '../admin/security.ts';
 import { createEmbeddedHandler, failedJobsFor } from '../embedded/handler.ts';
-import { PostgresAudit, PostgresComplianceLog, createDeadLetters, listShops } from '../queue/postgresAdminData.ts';
+import { PostgresAudit, PostgresComplianceLog, createDeadLetters, isOperatorShop, listShops } from '../queue/postgresAdminData.ts';
 import { verifyShop } from './admin.ts';
 import { configToForm, formToConfig } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
 import { R1_DEFAULT_CONFIG } from '../../recipes/retail-b2b-lead-spotter/recipe.ts';
@@ -91,11 +91,12 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       log,
     });
 
-    // The embedded Shopify admin page exists only when SHOPIFY_API_KEY is set. Only shops the operator already knows may use it.
+    // The embedded Shopify admin page exists only when SHOPIFY_API_KEY is set. Only shops the OPERATOR set up (a recipe-settings row or a stored
+    // connection) may use it; a store that merely installed the app and sent a webhook is not one.
     const embedded = config.apiKey === null ? null : createEmbeddedHandler({
       clientId: config.apiKey,
       clientSecret: config.webhookSecret,
-      knownShop: async (shop) => (await listShops(rt.pool, config.schema)).includes(shop),
+      knownShop: (shop) => isOperatorShop(rt.pool, config.schema, shop),
       data: {
         summary: async (shop) => {
           const [settings, conn] = await Promise.all([configs.get(shop, R1_ID), connections.info(shop)]);
