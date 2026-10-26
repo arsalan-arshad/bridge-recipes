@@ -544,9 +544,19 @@ test('the embedded /app surface: absent without SHOPIFY_API_KEY; with it, only a
     assert.ok(mine.includes('DRY-RUN') && mine.includes('gid://shopify/Order/1') && !mine.includes('gid://shopify/Order/2'), 'a shop sees only its own decisions (home)');
     const mineLog = await page(SHOP, 'log');
     assert.ok(mineLog.includes('gid://shopify/Order/1') && !mineLog.includes('gid://shopify/Order/2'), 'and in the log');
+    const token = (shop: string) => ({ Authorization: `Bearer ${tok(shop)}` });
+    // A store that merely installed the app and sent a webhook (it is in the log) is NOT set up by the operator: no page for it.
+    for (const route of ['home', 'log']) assert.equal((await fetch(`${url}/app/api/${route}`, { headers: token(OTHER) })).status, 403, `${route}: logged but never set up`);
+    // Once the operator adds it ("Add a shop" stores a recipe-settings row), it sees only its own data.
+    await app.stores.configs.set(OTHER, R1_ID, { enabled: false, dryRun: true, config: R1_DEFAULT_CONFIG });
     const theirs = await page(OTHER, 'log');
     assert.ok(theirs.includes('<s-badge tone="neutral">recipe_disabled</s-badge>') && !theirs.includes('gid://shopify/Order/1') && !theirs.includes('<s-badge tone="neutral">dry_run</s-badge>'), 'the other shop sees only its own (its recipe is off, so its row is recipe_disabled)');
-    assert.ok((await page(OTHER, 'home')).includes('NOT CONFIGURED'), 'a shop with no recipe row is shown as not configured (disabled)');
+    assert.ok((await page(OTHER, 'home')).includes('DISABLED'), 'an added shop whose recipe is off shows as disabled');
+    // A stored Salesforce connection also counts as set up by the operator.
+    const THIRD = 'third-store.myshopify.com';
+    assert.equal((await fetch(`${url}/app/api/home`, { headers: token(THIRD) })).status, 403);
+    await app.stores.connections.put(THIRD, { loginUrl: 'http://127.0.0.1:1', clientId: 'C', clientSecret: 'S' });
+    assert.equal((await fetch(`${url}/app/api/home`, { headers: token(THIRD) })).status, 200);
 
     const shell = await fetch(`${url}/app?shop=${SHOP}`);
     assert.equal(shell.status, 200);
