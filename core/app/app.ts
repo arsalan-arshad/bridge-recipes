@@ -22,7 +22,7 @@ import { createAdminHandler } from '../admin/handler.ts';
 import { handleLifecycleJob } from '../compliance/handlers.ts';
 import { LIFECYCLE_TOPICS } from '../compliance/topics.ts';
 import { deriveSessionKey } from '../admin/security.ts';
-import { createEmbeddedHandler, failedJobsFor, jobsFor } from '../embedded/handler.ts';
+import { createEmbeddedHandler, failedJobsFor, jobsFor, privacyEntryFor, privacyFor } from '../embedded/handler.ts';
 import { PostgresAudit, PostgresComplianceLog, createDeadLetters, isOperatorShop, listShops } from '../queue/postgresAdminData.ts';
 import { verifyShop } from './admin.ts';
 import { configToForm, formToConfig } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
@@ -74,6 +74,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
     });
 
     const dead = createDeadLetters(rt.boss);
+    const complianceLog = new PostgresComplianceLog(rt.pool, config.schema);
     const adminRecipe = { id: R1_ID, name: 'Retail-to-B2B Lead Spotter', defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, toForm: configToForm, fromForm: formToConfig };
     const audit = new PostgresAudit(rt.pool, config.schema, now);
 
@@ -89,7 +90,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }),
       dead,
       audit,
-      compliance: new PostgresComplianceLog(rt.pool, config.schema),
+      compliance: complianceLog,
       log,
     });
 
@@ -110,6 +111,8 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
         recent: (f) => syncLog.recent(f),
         failedJobs: async (shop) => failedJobsFor(await dead.list(), shop),
         jobs: async (shop) => jobsFor(await dead.list(), shop),
+        privacyList: async (shop) => privacyFor(await complianceLog.recentFor(shop, 200), shop),
+        privacyEntry: async (shop, id) => privacyEntryFor(await complianceLog.get(id), shop),
         settingsForm: async (shop) => adminRecipe.toForm((await configs.get(shop, R1_ID))?.config ?? R1_DEFAULT_CONFIG),
       },
       actions: { recipe: { id: R1_ID, defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, fromForm: formToConfig }, connections, configs, verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }) },
