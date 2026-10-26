@@ -18,21 +18,31 @@
     return res;
   }
 
-  async function load() {
+  async function load(path) {
     try {
-      var res = await get('/app/api/home', true);
+      var res = await get(path, true);
       if (res.ok) {
         root.innerHTML = await res.text(); // server-escaped HTML fragment (same rule as the admin pages)
       } else if (res.status === 403) {
         show('This store is not set up for this Bridge Recipes service. Ask the operator to add it.');
       } else {
-        show('Could not sign you in through Shopify. Reload the app.');
+        show('Could not load this page. Reload the app.');
       }
     } catch (e) {
       show('Could not reach the service. Reload the app.');
     }
   }
 
-  if (window.shopify && typeof window.shopify.idToken === 'function') load();
+  // Navigation: elements carry data-view="/app/api/..." (set by the server, never by user input). No inline handlers (CSP).
+  root.addEventListener('click', function (ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[data-view]') : null;
+    var path = el ? el.getAttribute('data-view') : null;
+    if (path && path.indexOf('/app/api/') === 0) {
+      ev.preventDefault();
+      load(path);
+    }
+  });
+
+  if (window.shopify && typeof window.shopify.idToken === 'function') load('/app/api/home');
   else show('This page must be opened from the Shopify admin.');
 })();
