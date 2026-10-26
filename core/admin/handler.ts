@@ -2,8 +2,9 @@
 //   method -> (login route) -> valid session -> [POST: content type, body size, Origin, form parse, CSRF token] -> action.
 // Anything that fails an earlier check never reaches a later one. Responses always carry the security headers.
 
-import { AdminError, assertShop, connectShop } from '../app/admin.ts';
-import { ConfigValidationError } from '../../recipes/retail-b2b-lead-spotter/validateConfig.ts';
+import { assertShop } from '../app/admin.ts';
+import { recipeAction, saveConfig, saveConnection, verifyConnection } from './actions.ts';
+import type { ActionOutcome } from './actions.ts';
 import { FormError, MAX_FORM_BYTES, parseForm } from './forms.ts';
 import { SECURITY_HEADERS, esc, layout } from './html.ts';
 import { complianceDetailPage, compliancePage, dashboardPage, loginPage, logPage, replayPage, shopPage } from './pages.ts';
@@ -128,6 +129,15 @@ export function createAdminHandler(deps: AdminDeps): (req: IncomingMessage, res:
     }
   }
 
+  // The shop write actions live in ./actions.ts (shared with the embedded page); null = not an action route.
+  async function runAction(section: string | undefined, shop: string, form: Map<string, string>): Promise<ActionOutcome | null> {
+    if (section === 'connection') return saveConnection(deps, shop, form);
+    if (section === 'verify') return verifyConnection(deps, shop);
+    if (section === 'recipe') return recipeAction(deps, shop, form);
+    if (section === 'config') return saveConfig(deps, shop, form);
+    return null;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'GET' && req.method !== 'POST') {
       res.writeHead(405, { ...SECURITY_HEADERS, Allow: 'GET, POST' }).end();
@@ -234,71 +244,18 @@ export function createAdminHandler(deps: AdminDeps): (req: IncomingMessage, res:
 
     if (req.method !== 'POST') return errorPage(res, 404, 'Not found');
 
-    if (section === 'connection') {
-      try {
-        await connectShop(deps.connections, shop, { loginUrl: form.get('loginUrl') ?? '', clientId: (form.get('clientId') ?? '').trim(), clientSecret: form.get('clientSecret') ?? '' });
-      } catch (e) {
-        if (e instanceof AdminError) return renderShop(res, 400, shop, csrf, { connError: e.message });
-        throw e;
-      }
-      await audit('connection_saved', shop);
-      return redirect(res, `/admin/shops/${shop}?msg=connection_saved`);
+    const outcome = await runAction(section, shop, form);
+    if (outcome === null) return errorPage(res, 404, 'Not found');
+    if (outcome.ok) {
+      await audit(outcome.audit.action, shop, outcome.audit.detail);
+      return redirect(res, `/admin/shops/${shop}?msg=${outcome.msg}`);
     }
-
-    if (section === 'verify') {
-      const r = await deps.verify(shop);
-      if (r.ok) {
-        await audit('connection_verified', shop);
-        return redirect(res, `/admin/shops/${shop}?msg=verified_ok`);
-      }
-      await audit('connection_failed', shop, r.reason);
-      return renderShop(res, 200, shop, csrf, { connError: `Connection check failed: ${r.reason}` });
+    if (outcome.kind === 'bad_request') return errorPage(res, 400, 'Bad request');
+    if (outcome.kind === 'connection') {
+      if (outcome.audit) await audit(outcome.audit.action, shop, outcome.audit.detail);
+      return renderShop(res, outcome.status, shop, csrf, { connError: outcome.message });
     }
-
-    if (section === 'recipe') {
-      const action = form.get('action');
-      const current = await deps.configs.get(shop, recipe.id);
-      const config = current?.config ?? recipe.defaultConfig;
-      if (action === 'disable') {
-        await deps.configs.disable(shop, recipe.id);
-        await audit('recipe_disabled', shop);
-        return redirect(res, `/admin/shops/${shop}?msg=disabled`);
-      }
-      if (action === 'enable_dry') {
-        await deps.configs.set(shop, recipe.id, { enabled: true, dryRun: true, config });
-        await audit('recipe_dry_run', shop);
-        return redirect(res, `/admin/shops/${shop}?msg=enabled_dry`);
-      }
-      if (action === 'go_live') {
-        if (form.get('confirm') !== 'LIVE') return renderShop(res, 400, shop, csrf, { errors: ['to go live, type LIVE in the confirmation box'] });
-        if (!(await deps.connections.info(shop)).stored) return renderShop(res, 400, shop, csrf, { errors: ['connect Salesforce first: there is nothing to write to'] });
-        await deps.configs.set(shop, recipe.id, { enabled: true, dryRun: false, config });
-        await audit('recipe_live', shop);
-        return redirect(res, `/admin/shops/${shop}?msg=live`);
-      }
-      return errorPage(res, 400, 'Bad request');
-    }
-
-    if (section === 'config') {
-      const submitted = recipe.fromForm(form);
-      try {
-        const valid = recipe.validate(submitted);
-        const current = await deps.configs.get(shop, recipe.id);
-        await deps.configs.set(shop, recipe.id, { enabled: current?.enabled ?? false, dryRun: current?.dryRun ?? true, config: valid });
-      } catch (e) {
-        if (e instanceof ConfigValidationError) {
-          const echo: Record<string, string | boolean> = {};
-          for (const [k, v] of form) if (k !== 'csrf') echo[k] = v;
-          echo.requireConsent = form.get('requireConsent') === 'on';
-          return renderShop(res, 422, shop, csrf, { form: echo, errors: e.problems });
-        }
-        throw e;
-      }
-      await audit('config_saved', shop);
-      return redirect(res, `/admin/shops/${shop}?msg=config_saved`);
-    }
-
-    return errorPage(res, 404, 'Not found');
+    return renderShop(res, outcome.status, shop, csrf, { errors: outcome.errors, ...(outcome.echo ? { form: outcome.echo } : {}) });
   }
 
   return (req, res) => {
