@@ -52,8 +52,9 @@ admin page instead.
    counts the real client, because Railway's `X-Forwarded-For` behaviour is disputed in the community.
 
 ## 5. Point Shopify at it
-In `shopify.app.toml` set every webhook `uri` to `https://<your-domain>/webhooks/shopify`, then run
-`shopify app deploy` and approve the release. Check that the old store-level webhooks (if any) are removed, or each
+Copy [`shopify.app.toml.example`](../shopify.app.toml.example) to `shopify.app.toml` (the real file is git-ignored because it carries
+your app's client id and host), fill in your client id and name, and set the webhook `uri` to
+`https://<your-domain>/webhooks/shopify`. Then run `shopify app deploy` and approve the release. Check that the old store-level webhooks (if any) are removed, or each
 order is delivered twice. A real `app/uninstalled` delivery is a safe end-to-end test.
 
 ## 6. Versions and deploys
