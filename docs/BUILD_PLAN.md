@@ -36,6 +36,7 @@ Each milestone is shippable on its own.
 - [ ] Threshold config, one-alert-ever rule, owner resolution, tests.
 
 ## M7 — App Store readiness (Phase B, only if R1 proven)
+- [ ] Embedded admin UI (owner decision 2026-10-26): milestones E1-E5 in `docs/EMBEDDED_UI.md` (skeleton and token check, then the pages, then review prep). Design written; nothing built.
 - [ ] Protected customer data request (level 2) with a clear purpose statement; data protection answers.
 - [ ] Run the `shopify-app-store-review` self-review; pricing plan registered ($0 Free).
 
