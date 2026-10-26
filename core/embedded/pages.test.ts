@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { homeFragment, logFragment, logPath, LOG_OUTCOMES } from './pages.ts';
-import type { HomeData } from './pages.ts';
+import { homeFragment, logFragment, logPath, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
+import type { HomeData, SetupData } from './pages.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
 const entry = (over: Partial<LogEntry> = {}): LogEntry => ({
@@ -73,7 +73,7 @@ test('navigation: every data-view is one of our /app/api/ paths and nothing else
   const html = homeFragment(home()) + logFragment({ shop: 's', outcome: 'failed', page: 3, entries: [entry()], hasNext: true });
   const views = [...html.matchAll(/data-view="([^"]*)"/g)].map((m) => m[1].replaceAll('&amp;', '&')); // the browser decodes &amp; in attributes
   assert.ok(views.length > 10);
-  for (const v of views) assert.match(v, /^\/app\/api\/(home|log)(\?[a-z_=&0-9]*)?$/, v);
+  for (const v of views) assert.match(v, /^\/app\/api\/(home|log|setup)(\?[a-z_=&0-9]*)?$/, v);
   assert.ok(!/href="(?!\/admin")/.test(html), 'the only href is the operator admin link');
   assert.ok(html.includes('<s-link href="/admin" target="_blank">'), 'the operator page opens in a new tab (it cannot be framed)');
 });
@@ -99,4 +99,47 @@ test('log: the full table has webhook id and operations; an empty page says so',
   const html = logFragment({ shop: 's', outcome: '', page: 1, entries: [entry({ ops: [{ kind: 'createLead', outcome: 'created', sfId: '00Qxx0000012345' }] } as any)], hasNext: false });
   assert.ok(html.includes('Webhook id') && html.includes('createLead: created') && html.includes('00Qxx0000012345') && html.includes('wh-1'));
   assert.ok(logFragment({ shop: 's', outcome: '', page: 1, entries: [], hasNext: false }).includes('No decisions yet.'));
+});
+
+const setup = (over: Partial<SetupData> = {}): SetupData => ({
+  shop: 's.myshopify.com', connection: { stored: false, lastVerifiedAt: null },
+  recipe: { name: 'Lead Spotter', configured: false, enabled: false, dryRun: true }, ...over,
+});
+
+test('setup: the forms post only to our write routes, and the secret field is a password field that never carries a value', () => {
+  const html = setupFragment(setup({ connection: { stored: true, lastVerifiedAt: '2026-10-26T10:00:00Z', loginUrl: 'https://acme.my.salesforce.com', clientId: 'KEY123' } }));
+  const posts = [...html.matchAll(/<form data-post="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(posts, ['/app/api/connection', '/app/api/verify', '/app/api/recipe', '/app/api/recipe', '/app/api/recipe']);
+  assert.ok(html.includes('<s-password-field label="Consumer secret" name="clientSecret" autocomplete="off"></s-password-field>'));
+  assert.ok(!/<s-password-field[^>]*value=/.test(html), 'no value attribute on the secret field');
+  assert.ok(html.includes('Org: https://acme.my.salesforce.com · client id: KEY123'));
+  assert.ok(html.includes('Replace connection') && html.includes('Test connection'));
+  assert.ok(html.includes('<s-badge tone="success">stored (encrypted)</s-badge>') && !html.includes('<s-badge tone="caution">not set</s-badge>'));
+  const fresh = setupFragment(setup());
+  assert.ok(fresh.includes('Save connection') && !fresh.includes('Test connection') && fresh.includes('<s-badge tone="caution">not set</s-badge>'));
+});
+
+test('setup: three recipe actions, the go-live form asks for the word LIVE, and the mode badge is right', () => {
+  const html = setupFragment(setup());
+  for (const a of ['enable_dry', 'disable', 'go_live']) assert.ok(html.includes(`name="action" value="${a}"`), a);
+  assert.ok(html.includes('Type LIVE to confirm') && html.includes('name="confirm"'));
+  assert.ok(html.includes('NOT CONFIGURED'));
+  assert.ok(setupFragment(setup({ recipe: { name: 'R', configured: true, enabled: true, dryRun: false } })).includes('<s-badge tone="critical">LIVE</s-badge>'));
+  assert.ok(setupFragment(setup({ recipe: { name: 'R', configured: true, enabled: true, dryRun: true } })).includes('DRY-RUN'));
+  assert.ok(setupFragment(setup({ recipe: { name: 'R', configured: true, enabled: false, dryRun: true } })).includes('<s-badge tone="caution">DISABLED</s-badge>'));
+});
+
+test('setup: notices come from a fixed list; unknown codes show nothing; problems are escaped', () => {
+  for (const [code, n] of Object.entries(NOTICES)) assert.ok(setupFragment(setup({ msg: code })).includes(`<s-banner tone="${n.tone}">`), code);
+  assert.ok(!setupFragment(setup({ msg: '<img src=x>' })).includes('<s-banner tone="success"'));
+  for (const code of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) assert.ok(!setupFragment(setup({ msg: code })).includes('<s-banner'), code);
+  const bad = setupFragment(setup({ errors: [HOSTILE], connError: HOSTILE }));
+  assert.ok(!bad.includes('<img') && bad.includes('&lt;img src=x onerror=alert(1)&gt;'));
+  assert.ok(bad.includes('heading="Not done"') && bad.includes('heading="Connection problem"'));
+  const org = setupFragment(setup({ connection: { stored: true, lastVerifiedAt: HOSTILE, loginUrl: HOSTILE, clientId: HOSTILE } }));
+  assert.ok(!org.includes('<img'));
+});
+
+test('home links to the setup page', () => {
+  assert.ok(homeFragment(home()).includes('<s-button variant="primary" data-view="/app/api/setup">'));
 });
