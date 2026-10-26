@@ -621,3 +621,17 @@ test('browser compatibility: the admin lets browsers send their real Origin (sam
     }
   });
 });
+
+test('the log shows each decision\'s Shopify webhook id (an opaque delivery id), escaped, so a decision can be tied to its delivery', async () => {
+  await withAdmin(async ({ b, req }) => {
+    b.entries.push({ at: '2026-10-26T11:04:43.489Z', shop: SHOP, recipeId: R1_ID, topic: 'orders/paid', objectId: 'order-1', webhookId: '19ec8866-1042-57b7-a839-42d329414940', outcome: 'dry_run', dryRun: true });
+    b.entries.push({ at: '2026-10-26T11:05:00.000Z', shop: SHOP, recipeId: R1_ID, topic: 'orders/paid', objectId: 'order-2', webhookId: '<script>alert(1)</script>', outcome: 'created', dryRun: false });
+    await req.login();
+    for (const path of [`/admin/shops/${SHOP}/log`, `/admin/shops/${SHOP}`]) {
+      const t = (await req.get(path)).text;
+      assert.ok(t.includes('Webhook id'), path);
+      assert.ok(t.includes('<code>19ec8866-1042-57b7-a839-42d329414940</code>'), path);
+      assert.ok(!t.includes('<script>alert(1)</script>') && t.includes('&lt;script&gt;'), `${path}: a hostile id must be escaped`);
+    }
+  });
+});
