@@ -14,9 +14,9 @@ step depends on a Railway feature, the source is cited and was read on the date 
   restricts outbound network access for unverified trial accounts, which can block calls to Salesforce and Shopify).
 - **Your copy of this repository on GitHub** (a fork, or the repository itself), connected to Railway.
 - A **Shopify app** in the Dev Dashboard (you need its client id and client secret) and the Shopify CLI on your computer.
-- A **Salesforce org** with an External Client App for the client-credentials flow (never a Connected App). The setup guide for it
-  is still to be written; until then see the README and `docs/research/R1_PLATFORM_FACTS.md`. The integration user needs a full
-  Salesforce licence for the Task path.
+- A **Salesforce org** with an External Client App for the client-credentials flow (never a Connected App), a dedicated integration
+  user and a narrow permission set: follow [`SETUP_SALESFORCE.md`](SETUP_SALESFORCE.md). The integration user needs a full Salesforce
+  licence for the Task path.
 - Your own **admin password** (12 characters or more) and an **encryption key** you generate: `openssl rand -hex 32`.
   Keep the key somewhere safe outside Railway; without it the stored Salesforce credentials cannot be read again.
 
