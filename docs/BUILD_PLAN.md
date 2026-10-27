@@ -29,7 +29,7 @@ Each milestone is shippable on its own.
 - [x] Log redaction review; secrets scan; dependency audit. _2026-10-21: every log call passes fixed event names plus ids/counts; unauthenticated headers are never logged; pool/queue errors logged by fixed name only; secrets scan clean; `npm audit` 0 vulnerabilities (2 direct dependencies). Two independent read-only reviews (security, library usage vs current docs) were run and their findings applied: see PROJECT_CONTEXT sections 33-34. Known limits: single shared admin password, in-memory login limiter, replay window of 14 days._
 
 ## M5 — Self-host release (Phase A)
-- [ ] README written last, from verified code; Railway deploy guide; custom-app install guide; Salesforce setup guide with screenshots.
+- [ ] README written last, from verified code; Railway deploy guide (written 2026-10-27 from the live deployment, with what is verified and what is not listed in it); custom-app install guide and Salesforce setup guide with screenshots still open.
 - [ ] Ask the owner before tagging a release.
 
 ## M6 — R2 VIP Threshold Alert

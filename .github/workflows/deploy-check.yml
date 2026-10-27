@@ -1,6 +1,7 @@
 name: Deploy check
 
-# Deployment itself is done by Railway's GitHub integration (it deploys main after CI passes; enable "Wait for CI").
+# Deployment itself is done by Railway's GitHub integration (it deploys main; enable "Wait for CI" if your Railway service offers it:
+# on the maintainer's service it did not, so a deploy can start before CI finishes).
 # This workflow then checks that the production service answers its health check. Set the repository variable
 # PRODUCTION_URL (Settings > Secrets and variables > Actions > Variables), for example https://your-app.up.railway.app.
 # Until it is set, this workflow only prints a notice.
