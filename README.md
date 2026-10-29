@@ -21,6 +21,8 @@ A recipe with no settings is disabled, and a newly enabled recipe is dry-run unt
 
 **Admin page (optional).** Set `ADMIN_PASSWORD` (at least 12 characters) and open `/admin` to connect Salesforce, test the connection, switch a recipe between dry-run, live and off, edit its settings, read the log and replay failed jobs, without the command line. It is a single-operator page behind a password, session cookie and CSRF protection; put it behind HTTPS in production. Leave `ADMIN_PASSWORD` unset and `/admin` does not exist. Limits: one shared password, no roles or two-factor, and the login limiter and logout list live in memory. It includes a **Compliance** page listing each privacy request and the Salesforce records to review.
 
+**Inside the Shopify admin (optional).** Set `SHOPIFY_API_KEY` (your app's client id, which is public) and release the app with `embedded = true` and the App URL `https://<your-host>/app` (see `shopify.app.toml.example`). The app then opens inside the Shopify admin with a first-run checklist, the decision log, Salesforce connection and test, dry-run and the kill switch, the recipe's settings, failed jobs with replay (only the store's own), and the store's privacy requests. Each request carries Shopify's signed sign-in token, and only stores you added on `/admin` can open it. **Going live is deliberately not offered there**: it needs the operator password on `/admin`. Leave `SHOPIFY_API_KEY` unset and `/app` does not exist.
+
 **Configuration.** All settings are listed in `.env.example`. Notable: `TRUSTED_PROXY=true` only when a reverse proxy you control sits in front (it makes the login limiter count the real client address and marks the session cookie Secure); the `RETENTION_*` settings (defaults: sync log 30 days, webhook delivery records 14, order-to-Salesforce mapping 30, compliance log 365; the admin audit trail uses the sync-log window). Failed jobs are kept 14 days, so replay works within that window.
 
 ---
@@ -83,7 +85,7 @@ flowchart LR
     SF -.->|"R3: Flow callout"| GW
 ```
 
-**Stack (as built):** TypeScript on Node >= 22.23 with native type stripping (no build step) · `pg` and `pg-boss` on PostgreSQL · AES-256-GCM for stored Salesforce credentials · tests with `node --test`. A Shopify-embedded admin (Remix) is only a Phase B idea; the current admin is a plain server-rendered page.
+**Stack (as built):** TypeScript on Node >= 22.23 with native type stripping (no build step) · `pg` and `pg-boss` on PostgreSQL · AES-256-GCM for stored Salesforce credentials · tests with `node --test`. Both the operator admin and the page inside the Shopify admin are plain server-rendered HTML (Shopify's Polaris web components in the embedded page); there is no frontend framework and no build step.
 
 ```
 core/            # gateway, queue, executor, worker, salesforce client, crypto, admin, compliance, app wiring
@@ -129,7 +131,8 @@ Connectors exist (Salesforce's own commerce tooling, iPaaS vendors, paid Shopify
 - [x] R1 with dry-run, existing-account check and consent filter _(exercised in one Developer org and one dev store with real storefront orders: marketing box ticked creates a Lead and a repeat buyer updates it, unticked is skipped)_
 - [x] Admin UI: connection, recipe settings, log with replay
 - [x] Privacy-webhook handlers with real redaction _(tested with signed requests; `app/uninstalled` verified with a real Shopify delivery; a real `customers/redact` or `shop/redact` has not been observed)_
-- [ ] Self-host guide (Railway) + custom-app install guide
+- [x] Self-host guides: [Railway deploy](docs/DEPLOY_RAILWAY.md), [Salesforce setup](docs/SETUP_SALESFORCE.md), [Shopify install](docs/INSTALL_SHOPIFY.md) _(written from the live deployment; each lists what was verified and what was not; no screenshots yet)_
+- [x] Embedded Shopify app page (home, log, setup, settings, failed jobs, privacy requests) _(seen working in one development store; installing through a Custom distribution link and on a real store are not yet tried)_
 - [ ] R2 VIP Threshold Alert
 - [ ] R3 Closed-Won → Draft Order + sample Flow
 - [ ] Good first issue: expand the free-email domain blocklist and add tests
