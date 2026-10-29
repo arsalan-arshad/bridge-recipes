@@ -1,6 +1,7 @@
 import { decide } from './decide.ts';
 import { buildContext } from './buildContext.ts';
 import { mapOrderPaid } from './mapOrderPaid.ts';
+import { minimizeOrderPaid } from './minimizeOrderPaid.ts';
 import type { Recipe } from '../../core/worker/recipe.ts';
 import type { Config, Context, OrderPaidEvent } from './types.ts';
 
@@ -10,6 +11,7 @@ export const r1Recipe: Recipe<OrderPaidEvent, Context, Config> = {
   id: R1_ID,
   topics: ['orders/paid'],
   mapEvent: mapOrderPaid,
+  minimize: minimizeOrderPaid,
   objectIdOf: (e) => e.orderId,
   emptyContext: () => ({ accountByDomain: null, existingByEmail: null }),
   buildContext,
