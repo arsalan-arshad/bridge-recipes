@@ -13,6 +13,7 @@ export interface Recipe<E = any, C = any, G = any> {
   id: string;
   topics: string[];
   mapEvent(payload: unknown): { ok: true; event: E } | { ok: false; reason: string };
+  minimize?(payload: unknown): unknown; // drops every field mapEvent does not read, before the notification is queued
   objectIdOf(event: E): string;
   // A context with no Salesforce matches. decide() runs on it first: a skip decided by rules that do not need Salesforce
   // (no email, free domain, below minimum, no consent) is final, so skipped orders cost no API calls.
