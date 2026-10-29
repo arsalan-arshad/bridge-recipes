@@ -279,3 +279,17 @@ test('a refused privacy request logs WHY with a fixed reason name and no payload
   assert.equal(log[0].reason, 'shop_mismatch');
   assert.ok(!JSON.stringify(log).includes('x@y.z') && !JSON.stringify(log).includes('someone-else'));
 });
+
+test('a topic with a minimiser is queued minimised (the signature and dedupe key still come from the original); other topics keep the raw body', async () => {
+  const intake = new MemoryIntake();
+  const { deps } = setup(intake, ['orders/paid', 'other/topic']);
+  deps.minimize = { 'orders/paid': (p) => ({ id: (p as { id: unknown }).id, only: 'this' }) };
+  assert.equal((await handleWebhook({ rawBody: raw, headers: headers() }, deps)).status, 200);
+  const job = intake.jobs[0];
+  assert.deepEqual(Object.keys(JSON.parse(job.payload)).sort(), ['id', 'only']);
+  assert.ok(job.businessKey.startsWith('orders/paid|example-store.myshopify.com|'), 'the key was computed from the original body');
+  const other = Buffer.from('{"id":5,"secret":"x"}');
+  assert.equal((await handleWebhook({ rawBody: other, headers: headers({ 'x-shopify-topic': 'other/topic', 'x-shopify-webhook-id': 'wh-2' }, other) }, deps)).status, 200);
+  assert.equal(intake.jobs[1].payload, '{"id":5,"secret":"x"}');
+  assert.equal(Object.hasOwn(deps.minimize, '__proto__'), false);
+});

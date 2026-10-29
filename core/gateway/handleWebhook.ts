@@ -92,7 +92,7 @@ export async function handleWebhook(
     apiVersion: header(headers, 'x-shopify-api-version'),
     businessKey: id === null ? webhookId : `${topic}|${shop}|${id}`,
     receivedAt: deps.now().toISOString(),
-    payload: rawBody.toString('utf8'),
+    payload: Object.hasOwn(deps.minimize ?? {}, topic) ? JSON.stringify(deps.minimize![topic](payload)) : rawBody.toString('utf8'),
   };
 
   // 4. Atomic dedupe + enqueue. If it throws, answer 500: nothing was recorded, so Shopify's retry is processed.
