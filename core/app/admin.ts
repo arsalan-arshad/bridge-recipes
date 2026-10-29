@@ -8,6 +8,8 @@ import type { ConnectionStore } from '../salesforce/connectionStore.ts';
 import type { PostgresConfigStore } from '../queue/postgresConfigStore.ts';
 import type { PostgresSyncLog } from '../queue/postgresSyncLog.ts';
 import type { FetchLike } from '../salesforce/client.ts';
+import { runSetupCheck } from '../salesforce/checkSetup.ts';
+import type { SetupResult } from '../salesforce/checkSetup.ts';
 
 export class AdminError extends Error {
   constructor(message: string) {
@@ -70,6 +72,14 @@ export async function verifyShop(connections: ConnectionStore, shop: string, opt
   } catch (e) {
     return { ok: false, reason: e instanceof SalesforceError ? `${e.kind}:${e.errorCode}` : 'internal' };
   }
+}
+
+// Reads (never writes) what the integration user may do in Salesforce and reports it as fixed-text checks.
+export async function checkShop(connections: ConnectionStore, shop: string, opts: { fetch?: FetchLike } = {}): Promise<SetupResult | { ok: false; reason: 'no_connection' }> {
+  assertShop(shop);
+  const conn = await connections.get(shop);
+  if (!conn) return { ok: false, reason: 'no_connection' };
+  return runSetupCheck(new SalesforceClient({ ...conn, fetch: opts.fetch }));
 }
 
 export async function setRecipe(configs: PostgresConfigStore, shop: string, recipeId: string, o: { enable: boolean; live?: boolean; config: unknown }): Promise<void> {

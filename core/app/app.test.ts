@@ -69,7 +69,7 @@ async function fakeSalesforce(opts: { createDelayMs?: number } = {}) {
 // ---- the app under test ----------------------------------------------------------------------------------
 async function withApp(
   fn: (c: { app: Awaited<ReturnType<typeof createApp>>; sf: Awaited<ReturnType<typeof fakeSalesforce>>; url: string; lines: string[]; schema: string; key: Buffer; deliver: (o?: { order?: number; shop?: string; webhookId?: string; sign?: string }) => Promise<number> }) => Promise<void>,
-  opts: { createDelayMs?: number; purgeEveryMs?: number; stopAfter?: boolean; adminPassword?: string; apiKey?: string } = {},
+  opts: { createDelayMs?: number; purgeEveryMs?: number; stopAfter?: boolean; adminPassword?: string; apiKey?: string; openRegistration?: boolean; maxShops?: number; merchantGoLive?: boolean } = {},
 ) {
   const sf = await fakeSalesforce({ createDelayMs: opts.createDelayMs });
   const schema = `bridge_t_${randomBytes(4).toString('hex')}`;
@@ -77,7 +77,7 @@ async function withApp(
   const key = randomBytes(32);
   const config: AppConfig = {
     databaseUrl: URL, schema, webhookSecret: SIGNING, encryptionKey: key, host: '127.0.0.1', port: 0,
-    retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 5000, adminPassword: opts.adminPassword ?? null, apiKey: opts.apiKey ?? null, trustProxy: false,
+    retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 5000, adminPassword: opts.adminPassword ?? null, apiKey: opts.apiKey ?? null, trustProxy: false, openRegistration: opts.openRegistration ?? false, maxShops: opts.maxShops ?? 25, merchantGoLive: opts.merchantGoLive ?? false,
   };
   const app = await createApp(config, { log: makeLogger((l) => lines.push(l)), purgeEveryMs: opts.purgeEveryMs });
   const url = `http://127.0.0.1:${app.port}`;
@@ -268,7 +268,7 @@ test('a failed start (port already in use) rejects and leaks no database connect
     const probe = new pg.Pool({ connectionString: URL, max: 1 });
     const count = async () => (await probe.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name = $1`, [tag])).rows[0].n as number;
     const schema2 = `bridge_t_${randomBytes(4).toString('hex')}`;
-    const cfg: AppConfig = { databaseUrl: tagged.toString(), schema: schema2, webhookSecret: SIGNING, encryptionKey: randomBytes(32), host: '127.0.0.1', port: app.port, retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 3000, adminPassword: null, apiKey: null, trustProxy: false };
+    const cfg: AppConfig = { databaseUrl: tagged.toString(), schema: schema2, webhookSecret: SIGNING, encryptionKey: randomBytes(32), host: '127.0.0.1', port: app.port, retention: DEFAULT_RETENTION, purgeEveryMinutes: 360, pollingSeconds: 1, shutdownTimeoutMs: 3000, adminPassword: null, apiKey: null, trustProxy: false, openRegistration: false, maxShops: 25, merchantGoLive: false };
     await assert.rejects(() => createApp(cfg, { log: () => {} }), /EADDRINUSE|address already in use/);
     let left = -1;
     for (let i = 0; i < 20; i++) { // closing is asynchronous: wait for it, up to 4 s
@@ -648,7 +648,10 @@ test('embedded writes end to end: connect, test, dry-run, go-live refused, kill 
 
     const p = new pg.Pool({ connectionString: URL, max: 1 });
     try {
-      const rows = (await p.query(`SELECT action, shop, detail FROM ${schema}.admin_audit ORDER BY id`)).rows;
+      const all = (await p.query(`SELECT action, shop, detail FROM ${schema}.admin_audit ORDER BY id`)).rows;
+      const views = all.filter((r) => String(r.action).startsWith('viewed_'));
+      assert.ok(views.every((r) => r.shop === NEWSHOP && r.detail === 'user staff-7'), 'reads of customer-derived pages are audited with the user');
+      const rows = all.filter((r) => !String(r.action).startsWith('viewed_'));
       const s_fail_detail = (all: any[]) => { const d = String(all.find((r) => r.action === 'connection_failed')?.detail ?? ''); assert.match(d, / · user staff-7$/); return d; };
       assert.deepEqual(rows.map((r) => [r.action, r.shop, r.detail]), [
         ['connection_saved', NEWSHOP, 'user staff-7'], ['connection_failed', NEWSHOP, s_fail_detail(rows)], ['connection_saved', NEWSHOP, 'user staff-7'],
@@ -663,4 +666,32 @@ test('embedded writes end to end: connect, test, dry-run, go-live refused, kill 
     }
     assert.ok(key.length === 32);
   }, { apiKey: 'APP-CLIENT-ID' });
+});
+
+test('open registration: off by default; on, a Shopify-signed token registers the store (disabled, dry-run) up to the cap, never twice, and a forged token registers nothing', { skip, timeout: 60_000 }, async () => {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const tok = (shop: string, secret = SIGNING) => {
+    const now = Math.floor(Date.now() / 1000);
+    const h = b64({ alg: 'HS256', typ: 'JWT' });
+    const p = b64({ iss: `https://${shop}/admin`, dest: `https://${shop}`, aud: 'APP-CLIENT-ID', exp: now + 60, nbf: now - 5, sub: '1' });
+    return `${h}.${p}.${createHmac('sha256', secret).update(`${h}.${p}`).digest('base64url')}`;
+  };
+  const home = (url: string, shop: string, secret?: string) => fetch(`${url}/app/api/home`, { headers: { Authorization: `Bearer ${tok(shop, secret)}` } });
+  const shops = async (app: Awaited<ReturnType<typeof createApp>>, schema: string) => (await app.runtime.pool.query(`SELECT shop, enabled, dry_run FROM ${schema}.recipe_config ORDER BY shop`)).rows;
+  await withApp(async ({ app, url, schema }) => {
+    assert.equal((await home(url, 'new-one.myshopify.com')).status, 403, 'default: the operator adds shops');
+    assert.equal((await shops(app, schema)).length, 0);
+  }, { apiKey: 'APP-CLIENT-ID' });
+  await withApp(async ({ app, url, schema }) => {
+    // withApp connected SHOP already: that is shop 1 of 3
+    assert.equal((await home(url, 'forged.myshopify.com', 'not-the-secret')).status, 401, 'a forged token registers nothing');
+    assert.equal((await home(url, 'one.myshopify.com')).status, 200);
+    assert.equal((await home(url, 'one.myshopify.com')).status, 200, 'opening again is fine');
+    assert.deepEqual((await shops(app, schema)).filter((r) => r.shop === 'one.myshopify.com'), [{ shop: 'one.myshopify.com', enabled: false, dry_run: true }], 'registered once, disabled and dry-run');
+    assert.equal((await home(url, 'two.myshopify.com')).status, 200);
+    assert.equal((await home(url, 'three.myshopify.com')).status, 403, 'the cap: SHOP + two registered = 3');
+    assert.equal((await shops(app, schema)).some((r) => r.shop === 'three.myshopify.com'), false);
+    assert.equal((await home(url, 'one.myshopify.com')).status, 200, 'a registered store still gets in at the cap');
+    assert.equal((await home(url, SHOP)).status, 200, 'and so does the operator-connected one');
+  }, { apiKey: 'APP-CLIENT-ID', openRegistration: true, maxShops: 3 });
 });

@@ -23,8 +23,8 @@ import { handleLifecycleJob } from '../compliance/handlers.ts';
 import { LIFECYCLE_TOPICS } from '../compliance/topics.ts';
 import { deriveSessionKey } from '../admin/security.ts';
 import { createEmbeddedHandler, failedJobsFor, jobsFor, privacyEntryFor, privacyFor } from '../embedded/handler.ts';
-import { PostgresAudit, PostgresComplianceLog, createDeadLetters, isOperatorShop, listShops } from '../queue/postgresAdminData.ts';
-import { verifyShop } from './admin.ts';
+import { PostgresAudit, PostgresComplianceLog, createDeadLetters, isOperatorShop, listShops, registerShop } from '../queue/postgresAdminData.ts';
+import { checkShop, verifyShop } from './admin.ts';
 import { configToForm, formToConfig } from '../../recipes/retail-b2b-lead-spotter/adminForm.ts';
 import { R1_DEFAULT_CONFIG } from '../../recipes/retail-b2b-lead-spotter/recipe.ts';
 import { makeLogger } from './logger.ts';
@@ -69,6 +69,7 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
       intake: rt.intake,
       // the recipes' topics plus the mandatory privacy webhooks and the uninstall event
       topics: new Set([...recipes.flatMap((r) => r.topics), ...LIFECYCLE_TOPICS]),
+      minimize: Object.fromEntries(recipes.flatMap((r) => (r.minimize ? r.topics.map((t) => [t, r.minimize!] as const) : []))),
       now,
       log: (e) => log(e.outcome === 'intake_error' ? 'error' : 'info', 'webhook', { outcome: e.outcome, topic: e.topic, shop: e.shop, webhookId: e.webhookId, ...(e.reason ? { reason: e.reason } : {}) }),
     });
@@ -99,7 +100,9 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
     const embedded = config.apiKey === null ? null : createEmbeddedHandler({
       clientId: config.apiKey,
       clientSecret: config.webhookSecret,
-      knownShop: (shop) => isOperatorShop(rt.pool, config.schema, shop),
+      knownShop: config.openRegistration
+        ? (shop) => registerShop(rt.pool, config.schema, shop, R1_ID, R1_DEFAULT_CONFIG, config.maxShops)
+        : (shop) => isOperatorShop(rt.pool, config.schema, shop),
       data: {
         summary: async (shop) => {
           const [settings, conn] = await Promise.all([configs.get(shop, R1_ID), connections.info(shop)]);
@@ -115,9 +118,10 @@ export async function createApp(config: AppConfig, opts: AppOptions = {}) {
         privacyEntry: async (shop, id) => privacyEntryFor(await complianceLog.get(id), shop),
         settingsForm: async (shop) => adminRecipe.toForm((await configs.get(shop, R1_ID))?.config ?? R1_DEFAULT_CONFIG),
       },
-      actions: { recipe: { id: R1_ID, defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, fromForm: formToConfig }, connections, configs, verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }) },
+      actions: { recipe: { id: R1_ID, defaultConfig: R1_DEFAULT_CONFIG, validate: validateR1Config, fromForm: formToConfig }, connections, configs, verify: (shop) => verifyShop(connections, shop, { fetch: opts.fetch, now }), check: (shop) => checkShop(connections, shop, { fetch: opts.fetch }) },
       audit,
       dead,
+      goLive: config.merchantGoLive ? { minDryRun: 3 } : null,
       now: () => now().getTime(),
       log,
     });
