@@ -65,8 +65,10 @@ needed ([Protected customer data](https://shopify.dev/docs/apps/launch/protected
 email and will skip orders with `no_email`.
 
 ## 5. Tell the service the store is yours, then open the app
-1. Open your service's `/admin`, sign in, **Add a shop**: `<your-store>.myshopify.com`. Only stores you add can open the app (so
-   another store that installs a public app cannot).
+1. By default only stores you add can open the app: open your service's `/admin`, sign in, **Add a shop**: `<your-store>.myshopify.com`.
+   For a public app set `OPEN_REGISTRATION=true` (and `MAX_SHOPS`) on the service instead: a store that installs and opens the app
+   registers itself, disabled and in dry-run, until the cap is reached. Going live from the app is a separate switch
+   (`MERCHANT_GO_LIVE=true`); without it, only you can, on `/admin`.
 2. In the Shopify admin open **Apps**, then your app. It opens **inside the admin** on its home page, with a "Get started"
    checklist: connect Salesforce, test it, turn the recipe on in dry-run, place a paid test order.
 3. If a store has a **storefront password** (development stores often do), enter it before placing a test order, or the order never
