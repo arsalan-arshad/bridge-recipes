@@ -6,6 +6,7 @@ import { AdminError, connectShop } from '../app/admin.ts';
 import { ConfigValidationError } from '../../recipes/retail-b2b-lead-spotter/validateConfig.ts';
 import type { ConnectionStore } from '../salesforce/connectionStore.ts';
 import type { RecipeSettings } from '../worker/recipe.ts';
+import type { SetupResult } from '../salesforce/checkSetup.ts';
 
 export interface ActionRecipe {
   id: string;
@@ -23,6 +24,7 @@ export interface ActionDeps {
     disable(shop: string, recipeId: string): Promise<boolean>;
   };
   verify(shop: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  check(shop: string): Promise<SetupResult | { ok: false; reason: 'no_connection' }>; // read-only Salesforce permission check
 }
 
 export interface AuditNote {
