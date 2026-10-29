@@ -33,6 +33,7 @@ function setup(opts: { verify?: ActionDeps['verify']; settings?: RecipeSettings 
       disable: async (s, r) => { const cur = store.get(`${s}|${r}`); if (!cur) return false; store.set(`${s}|${r}`, { ...cur, enabled: false }); return true; },
     },
     verify: opts.verify ?? (async () => ({ ok: true })),
+    check: async () => ({ ok: false, reason: 'no_connection' }),
   };
   return { deps, store, writes };
 }

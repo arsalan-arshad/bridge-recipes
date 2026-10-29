@@ -32,6 +32,7 @@ export interface GatewayDeps {
   secret: string; // app / store webhook signing key
   intake: Intake;
   topics: ReadonlySet<string>; // topics a recipe or compliance handler listens to
+  minimize?: Readonly<Record<string, (payload: unknown) => unknown>>; // per topic: keep only the fields the recipe reads (data minimisation)
   now: () => Date;
   log: (entry: LogEntry) => void;
 }

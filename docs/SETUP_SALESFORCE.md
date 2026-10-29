@@ -84,6 +84,11 @@ Run As again, save, and re-run. (This exact check was run against the maintainer
 terminal history afterwards if it recorded the secret.
 
 ## 5. Connect it in the app
+The Shopify app has the same steps as a short guide (**Salesforce setup guide** on the first-run checklist and the Set up page) and a
+**Check my setup** button. The check is read-only: it asks Salesforce what the integration user may do with Leads, Tasks, Accounts and
+Contacts and tells you what to fix, including a warning if the user can do *more* than Bridge Recipes needs (for example delete Leads,
+which usually means Run As is still an administrator). It makes four describe calls and writes nothing.
+
 In the Shopify app open **Set up** (or `/admin`, the shop's page) and enter:
 - **My Domain URL:** `https://<yourdomain>.my.salesforce.com`. Only HTTPS Salesforce domains with no port are accepted
   (`*.my.salesforce.com`, `*.salesforce.com`, `*.force.com` and the `*.salesforce-setup.com` equivalents); anything else is refused so the

@@ -28,6 +28,9 @@ export interface AppConfig {
   trustProxy: boolean; // TRUSTED_PROXY=true: a reverse proxy we control sets X-Forwarded-For/Proto
   adminPassword: string | null; // null = the admin UI is switched off (its routes do not exist)
   apiKey: string | null; // the Shopify app's client id (public); null = the embedded /app surface is switched off
+  openRegistration: boolean; // OPEN_REGISTRATION=true: a store that opens the installed app registers itself (up to maxShops); default false = the operator adds shops
+  maxShops: number; // the most stores that may register themselves
+  merchantGoLive: boolean; // MERCHANT_GO_LIVE=true: a store may switch its own recipe from dry-run to LIVE in the embedded app (after the readiness checks); default false = only the operator, on /admin
 }
 
 function int(env: Record<string, string | undefined>, name: string, def: number, min: number, max: number, problems: string[]): number {
@@ -83,6 +86,9 @@ export function loadEnv(env: Record<string, string | undefined> = process.env): 
     pollingSeconds: int(env, 'WORKER_POLL_SECONDS', 2, 1, 60, problems),
     shutdownTimeoutMs: int(env, 'SHUTDOWN_TIMEOUT_SECONDS', 20, 1, 300, problems) * 1000,
     adminPassword, apiKey,
+    openRegistration: /^(1|true|yes)$/i.test(env.OPEN_REGISTRATION ?? ''),
+    maxShops: int(env, 'MAX_SHOPS', 25, 1, 100000, problems),
+    merchantGoLive: /^(1|true|yes)$/i.test(env.MERCHANT_GO_LIVE ?? ''),
     trustProxy: /^(1|true|yes)$/i.test(env.TRUSTED_PROXY ?? ''),
   };
   if (problems.length > 0) throw new ConfigError(problems);

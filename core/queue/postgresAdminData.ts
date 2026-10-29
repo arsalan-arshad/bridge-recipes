@@ -46,6 +46,22 @@ export async function isOperatorShop(pool: Pool, schema: string, shop: string): 
   return r.rowCount === 1;
 }
 
+// Self-registration (OPEN_REGISTRATION): a Shopify-signed token proves the store installed the app, so give it a disabled, dry-run
+// settings row, unless the table already holds `max` shops. One statement, so two stores opening at once cannot both squeeze past the cap.
+// Returns true when the shop is registered afterwards (already, or now).
+export async function registerShop(pool: Pool, schema: string, shop: string, recipeId: string, defaultConfig: unknown, max: number): Promise<boolean> {
+  assertSchemaName(schema);
+  if (await isOperatorShop(pool, schema, shop)) return true;
+  const r = await pool.query(
+    `INSERT INTO ${schema}.recipe_config (shop, recipe_id, enabled, dry_run, config)
+     SELECT $1, $2, false, true, $3::jsonb
+     WHERE (SELECT count(DISTINCT shop) FROM (SELECT shop FROM ${schema}.recipe_config UNION SELECT shop FROM ${schema}.salesforce_connection) s) < $4
+     ON CONFLICT (shop, recipe_id) DO NOTHING`,
+    [shop, recipeId, JSON.stringify(defaultConfig), max],
+  );
+  return r.rowCount === 1 || (await isOperatorShop(pool, schema, shop));
+}
+
 // Every shop the system knows anything about (setup rows AND the log): for the operator's own list, never for access decisions.
 export async function listShops(pool: Pool, schema: string): Promise<string[]> {
   assertSchemaName(schema);

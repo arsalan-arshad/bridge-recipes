@@ -5,6 +5,7 @@
 import { esc } from '../admin/html.ts';
 import { LOG_OUTCOMES } from '../admin/pages.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
+import type { SetupCheck } from '../salesforce/checkSetup.ts';
 
 export const PAGE_SIZE = 50;
 export const HOME_SAMPLE = 100; // the home page summarises the latest decisions, not all history
@@ -127,6 +128,7 @@ export const NOTICES: Record<string, { tone: 'success' | 'warning'; text: string
   connection_saved: { tone: 'success', text: 'Salesforce connection saved. The secret is stored encrypted and is never shown again. Use "Test connection".' },
   verified_ok: { tone: 'success', text: 'The Salesforce connection works.' },
   config_saved: { tone: 'success', text: 'Settings saved.' },
+  live: { tone: 'warning', text: 'The recipe is LIVE: it now creates Leads and Tasks in your Salesforce. Use the kill switch or go back to dry-run to stop it.' },
   replayed: { tone: 'success', text: 'Jobs moved back to the queue; the worker will retry them.' },
   nothing_to_replay: { tone: 'warning', text: 'Nothing to replay.' },
   enabled_dry: { tone: 'success', text: 'Recipe enabled in DRY-RUN: it reads from Salesforce and logs what it would do, but writes nothing.' },
@@ -140,11 +142,28 @@ export interface SetupData {
   msg?: string; // a key of NOTICES
   errors?: string[]; // settings/go-live problems (fixed or validated text)
   connError?: string; // a connection problem (already free of secrets)
+  goLive?: { readiness: { label: string; ok: boolean }[]; live: boolean } | null; // absent/null: going live is not offered from this page
 }
 
 // The consumer key identifies the Salesforce app; staff do not need all of it. Show only the end, and nothing for a short one.
 export function maskKey(key: string): string {
   return key.length > 8 ? `…${key.slice(-4)}` : '••••';
+}
+
+function goLiveSection(g: NonNullable<SetupData['goLive']>): string {
+  const rows = g.readiness.map((r) => `<s-paragraph>${badge(r.ok ? 'ready' : 'not yet', r.ok ? 'success' : 'caution')} ${esc(r.label)}</s-paragraph>`).join('\n');
+  const ready = g.readiness.every((r) => r.ok);
+  if (g.live) {
+    return `<s-banner tone="critical" heading="LIVE">This recipe is writing Leads and Tasks to your Salesforce.</s-banner>
+<form data-post="/app/api/recipe"><input type="hidden" name="action" value="enable_dry"><s-button data-submit>Stop writing: back to dry-run</s-button></form>`;
+  }
+  return `<s-heading>Go live</s-heading>
+<s-paragraph>Going live makes the recipe create Leads and Tasks in your Salesforce for real. Before you do:</s-paragraph>
+${rows}
+${ready ? `<form data-post="/app/api/recipe"><input type="hidden" name="action" value="go_live">
+<s-text-field label="Type LIVE to confirm" name="confirm" autocomplete="off"></s-text-field>
+<s-button tone="critical" data-submit>Go live</s-button></form>` : '<s-paragraph><s-text color="subdued">Going live unlocks when every item above is ready.</s-text></s-paragraph>'}
+<s-paragraph><s-text color="subdued">You can stop at any time with the kill switch or by going back to dry-run.</s-text></s-paragraph>`;
 }
 
 const field = (label: string, name: string, extra = '') => `<s-text-field label="${esc(label)}" name="${esc(name)}" autocomplete="off" ${extra}></s-text-field>`;
@@ -166,6 +185,7 @@ export function setupFragment(d: SetupData): string {
 ${note}${connProblem}${problems}
 <s-section heading="Salesforce connection">
 <s-paragraph>${status}</s-paragraph>
+<s-paragraph>${view('/app/api/guide', 'Salesforce setup guide and check')}</s-paragraph>
 ${post('/app/api/connection', `${field('My Domain URL', 'loginUrl', 'placeholder="https://your-domain.my.salesforce.com"')}
 ${field('Consumer key (client id)', 'clientId')}
 <s-password-field label="Consumer secret" name="clientSecret" autocomplete="off"></s-password-field>
@@ -176,7 +196,55 @@ ${c.stored ? post('/app/api/verify', '<s-button data-submit>Test connection</s-b
 <s-paragraph>Mode: ${mode}</s-paragraph>
 ${post('/app/api/recipe', `${act('enable_dry')}<s-button variant="primary" data-submit>Enable in dry-run</s-button>`)}
 ${post('/app/api/recipe', `${act('disable')}<s-button tone="critical" data-submit>Kill switch: disable</s-button>`)}
-<s-paragraph><s-text color="subdued">Going live (writing Leads and Tasks to Salesforce) is not done from here: it needs the operator password, on the <s-link href="/admin" target="_blank">operator admin page</s-link>. From here you can connect, test, run in dry-run, and switch the recipe off.</s-text></s-paragraph>
+${d.goLive ? goLiveSection(d.goLive) : '<s-paragraph><s-text color="subdued">Going live (writing Leads and Tasks to Salesforce) is not done from here: it needs the operator password, on the <s-link href="/admin" target="_blank">operator admin page</s-link>. From here you can connect, test, run in dry-run, and switch the recipe off.</s-text></s-paragraph>'}
+</s-section></s-page>`;
+}
+
+// ---- guide page: the Salesforce setup steps, and a read-only check of what the integration user may do -------------------------------------------
+
+export interface GuideData {
+  shop: string;
+  stored: boolean;
+  result?: { ok: true; checks: SetupCheck[] } | { ok: false; reason: 'auth' | 'unreachable' | 'no_connection' };
+}
+
+const CHECK_PROBLEM: Record<string, string> = {
+  auth: 'Salesforce did not accept the connection. Check the My Domain URL, the consumer key and secret, and that the Client Credentials Flow is enabled with a Run As user on the app (step 3).',
+  unreachable: 'Salesforce could not be reached just now. Try again in a minute.',
+  no_connection: 'Save your connection first (the Set up page), then run the check.',
+};
+
+export const GUIDE_STEPS: { title: string; body: string }[] = [
+  { title: '1. Create the integration user', body: 'In Salesforce Setup, Users, New User: licence "Salesforce" (a full licence; the "Salesforce Integration" licence does not work for Tasks), profile "Minimum Access - Salesforce". Nobody logs in as this user.' },
+  { title: '2. Create and assign a permission set', body: 'Permission set "Bridge_Recipes_Integration": system permissions API Enabled and Edit Tasks; Lead read, create, edit (no delete); Account read with field Website; Contact read with fields Email and Account; Task field access on Description, Related To and Name. Assign it to the integration user.' },
+  { title: '3. Create the External Client App', body: 'Setup, External Client App Manager, New. Local distribution. OAuth scope "Manage user data via APIs (api)" only. On the Policies tab enable the Client Credentials Flow and set Run As to the integration user. Then copy the consumer key and secret.' },
+  { title: '4. Connect it here', body: 'On the Set up page enter your My Domain URL, the consumer key and the consumer secret, then Save connection and Test connection.' },
+  { title: '5. Check the setup', body: 'Press "Check my setup" below. It reads what the integration user may do and tells you what to fix. It writes nothing to Salesforce.' },
+];
+
+export function guideFragment(d: GuideData): string {
+  const steps = GUIDE_STEPS.map((s) => `<s-paragraph><s-text type="strong">${esc(s.title)}</s-text><br>${esc(s.body)}</s-paragraph>`).join('\n');
+  let result = '';
+  if (d.result) {
+    if (d.result.ok) {
+      const rows = d.result.checks.map((c) => `<s-table-row><s-table-cell>${badge(c.status === 'pass' ? 'ok' : c.status === 'warn' ? 'too broad' : 'fix needed', c.status === 'pass' ? 'success' : c.status === 'warn' ? 'caution' : 'critical')}</s-table-cell><s-table-cell>${esc(c.title)}</s-table-cell><s-table-cell>${c.fix ? esc(c.fix) : ''}</s-table-cell></s-table-row>`).join('');
+      const allGood = d.result.checks.every((c) => c.status === 'pass');
+      result = `${allGood ? '<s-banner tone="success">Everything the recipe needs is in place, and nothing extra.</s-banner>' : '<s-banner tone="warning">Some things need attention.</s-banner>'}
+<s-table><s-table-header-row><s-table-header>Status</s-table-header><s-table-header>Check</s-table-header><s-table-header>What to do</s-table-header></s-table-header-row><s-table-body>${rows}</s-table-body></s-table>`;
+    } else {
+      result = `<s-banner tone="critical" heading="Check not completed">${esc(Object.hasOwn(CHECK_PROBLEM, d.result.reason) ? CHECK_PROBLEM[d.result.reason] : CHECK_PROBLEM.unreachable)}</s-banner>`;
+    }
+  }
+  return `<s-page heading="Salesforce setup guide">
+<s-section><s-paragraph>${view('/app/api/home', 'Back to home')} ${view('/app/api/setup', 'Go to Set up')}</s-paragraph></s-section>
+<s-section heading="Steps (about 15 minutes)">
+${steps}
+<s-paragraph><s-text color="subdued">Bridge Recipes connects to your own Salesforce org and never asks for a Salesforce username or password. It only reads Leads, Contacts and Accounts, and (once you go live) creates Leads and Tasks.</s-text></s-paragraph>
+</s-section>
+<s-section heading="Check my setup">
+${d.stored ? '' : '<s-paragraph><s-text color="subdued">Save your connection on the Set up page first.</s-text></s-paragraph>'}
+<form data-post="/app/api/check"><s-button variant="primary" data-submit>Check my setup</s-button></form>
+${result}
 </s-section></s-page>`;
 }
 
@@ -275,7 +343,7 @@ function onboardingCard(d: HomeData): string {
     return `<s-banner tone="success" heading="Setup complete">The app is set up and has processed at least one order. Going live (writing to Salesforce) is optional and is done from the operator admin page.</s-banner>`;
   }
   const rows = steps.map((s) => `<s-paragraph>${badge(s.done ? 'done' : 'to do', s.done ? 'success' : 'caution')} ${esc(s.label)}${s.done ? '' : `${s.view ? ` ${view(s.view, s.button ?? 'Open')}` : ''}${s.hint ? ` <s-text color="subdued">${esc(s.hint)}</s-text>` : ''}`}</s-paragraph>`).join('\n');
-  return `<s-section heading="Get started">\n${rows}\n</s-section>`;
+  return `<s-section heading="Get started">\n${rows}\n<s-paragraph><s-text color="subdued">New to the Salesforce side?</s-text> ${view('/app/api/guide', 'Open the Salesforce setup guide')}</s-paragraph>\n</s-section>`;
 }
 
 // ---- privacy requests: what Shopify asked us to delete or report for THIS store, and what was done ----------------------------------------------
