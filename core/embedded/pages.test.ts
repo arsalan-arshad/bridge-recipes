@@ -270,3 +270,21 @@ test('privacy request details: the records to review and plain numbers only; eve
 test('home links to privacy requests', () => {
   assert.ok(homeFragment(home()).includes('data-view="/app/api/privacy">Privacy requests</s-button>'));
 });
+
+test('the guide page lists the steps, offers the check, and escapes anything it was given', async () => {
+  const { guideFragment, GUIDE_STEPS } = await import('./pages.ts');
+  const html = guideFragment({ shop: 's.myshopify.com', stored: false });
+  for (const s of GUIDE_STEPS) assert.ok(html.includes(s.title));
+  assert.ok(html.includes('data-post="/app/api/check"') && html.includes('Save your connection on the Set up page first.'));
+  const shown = guideFragment({ shop: 's.myshopify.com', stored: true, result: { ok: true, checks: [{ id: 'x', title: '<img src=x>', status: 'fail', fix: '<script>1</script>' }] } });
+  assert.ok(!shown.includes('<img') && !shown.includes('<script>') && shown.includes('fix needed') && shown.includes('Some things need attention.'));
+  assert.ok(guideFragment({ shop: 's', stored: true, result: { ok: true, checks: [{ id: 'x', title: 'T', status: 'warn', fix: 'f' }] } }).includes('too broad'));
+  assert.ok(guideFragment({ shop: 's', stored: true, result: { ok: true, checks: [{ id: 'x', title: 'T', status: 'pass' }] } }).includes('Everything the recipe needs is in place'));
+  assert.ok(guideFragment({ shop: 's', stored: true, result: { ok: false, reason: 'no_connection' } }).includes('Save your connection first'));
+  assert.ok(guideFragment({ shop: 's', stored: true, result: { ok: false, reason: '__proto__' as any } }).includes('could not be reached'));
+});
+
+test('the first-run checklist links to the Salesforce setup guide, and the Set up page does too', () => {
+  assert.ok(homeFragment(fresh()).includes('data-view="/app/api/guide">Open the Salesforce setup guide</s-button>'));
+  assert.ok(setupFragment({ shop: 's', connection: { stored: false, lastVerifiedAt: null }, recipe: { name: 'R', configured: false, enabled: false, dryRun: true } }).includes('data-view="/app/api/guide"'));
+});

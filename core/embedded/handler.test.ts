@@ -45,7 +45,7 @@ function fakeData(over: Partial<EmbeddedData> = {}) {
 }
 
 // The shared write actions over in-memory stores, plus a record of every audit entry.
-function fakeWrites(opts: { verify?: ActionDeps['verify']; auditFails?: boolean } = {}) {
+function fakeWrites(opts: { verify?: ActionDeps['verify']; check?: ActionDeps['check']; auditFails?: boolean } = {}) {
   const settings = new Map<string, RecipeSettings>();
   const connections = new MemoryConnectionStore();
   const audits: { action: string; shop?: string; detail?: string }[] = [];
@@ -62,6 +62,7 @@ function fakeWrites(opts: { verify?: ActionDeps['verify']; auditFails?: boolean 
       disable: async (s, r) => { const c = settings.get(`${s}|${r}`); if (!c) return false; settings.set(`${s}|${r}`, { ...c, enabled: false }); return true; },
     },
     verify: opts.verify ?? (async () => ({ ok: true })),
+    check: opts.check ?? (async () => ({ ok: true, checks: [{ id: 'lead', title: 'Leads: read, create and update', status: 'pass' }] })),
   };
   const audit = { record: async (e: { action: string; shop?: string; detail?: string }) => { if (opts.auditFails) throw new Error('audit down'); audits.push(e); } };
   return { actions, audit, settings, connections, audits };
@@ -71,7 +72,7 @@ const OWN_A = '11111111-1111-4111-8111-111111111111';
 const OWN_B = '33333333-3333-4333-8333-333333333333';
 const OTHER_JOB = '22222222-2222-4222-8222-222222222222';
 
-async function withServer(fn: (url: string, logs: string[], calls: string[], w: ReturnType<typeof fakeWrites>, replays: string[][]) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData>; writes?: Parameters<typeof fakeWrites>[0]; dead?: { id: string; shop: string }[]; replayMoves?: number } = {}) {
+async function withServer(fn: (url: string, logs: string[], calls: string[], w: ReturnType<typeof fakeWrites>, replays: string[][]) => Promise<void>, opts: { known?: (s: string) => Promise<boolean>; data?: Partial<EmbeddedData>; writes?: Parameters<typeof fakeWrites>[0]; dead?: { id: string; shop: string }[]; replayMoves?: number; goLive?: { minDryRun: number } | null } = {}) {
   const replays: string[][] = [];
   const logs: string[] = [];
   const w = fakeWrites(opts.writes);
@@ -79,7 +80,7 @@ async function withServer(fn: (url: string, logs: string[], calls: string[], w: 
   const handle = createEmbeddedHandler({
     clientId: ID, clientSecret: SECRET, now: () => NOW, data, actions: w.actions, audit: w.audit,
     dead: { list: async () => opts.dead ?? [{ id: OWN_A, shop: SHOP }, { id: OTHER_JOB, shop: 'other-shop.myshopify.com' }, { id: OWN_B, shop: SHOP }], replay: async (ids) => { replays.push(ids); return opts.replayMoves ?? ids.length; } },
-    knownShop: opts.known ?? (async (s) => s === SHOP),
+    goLive: opts.goLive, knownShop: opts.known ?? (async (s) => s === SHOP),
     log: (_l, event, fields) => logs.push(`${event} ${JSON.stringify(fields ?? {})}`),
   });
   const server = createServer((req, res) => {
@@ -585,4 +586,108 @@ test('privacy scoping: only this shop\'s records, look-alike shop names kept apa
   for (const foreign of [all[1], all[2], all[3]]) assert.equal(privacyEntryFor(foreign as any, SHOP), null);
   assert.equal(privacyEntryFor(null, SHOP), null);
   assert.deepEqual(privacyFor([], SHOP), []);
+});
+
+test('the setup guide shows the steps and offers the check; the check reports each result, is audited with the user, and is POST-only', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const g = await fetch(`${url}/app/api/guide`, { headers: bearer(token()) });
+    assert.equal(g.status, 200);
+    const html = await g.text();
+    assert.ok(html.includes('Salesforce setup guide') && html.includes('data-post="/app/api/check"'));
+    assert.equal((await fetch(`${url}/app/api/guide`)).status, 401, 'no token, no guide');
+    assert.equal((await fetch(`${url}/app/api/check`, { headers: bearer(token()) })).status, 405, 'a check is a POST');
+    const r = await post(url, '/app/api/check', {});
+    assert.equal(r.status, 200);
+    assert.ok((await r.text()).includes('Everything the recipe needs is in place'));
+    assert.deepEqual(w.audits, [{ action: 'setup_checked', shop: SHOP, detail: 'checks=1 attention=0 · user 42' }]);
+  });
+});
+
+test('a check that finds a problem or cannot log in says so in fixed words and never shows the reason Salesforce gave', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    const html = await (await post(url, '/app/api/check', {})).text();
+    assert.ok(html.includes('Some things need attention.') && html.includes('Move the user to a full licence'));
+    assert.deepEqual(w.audits, [{ action: 'setup_checked', shop: SHOP, detail: 'checks=2 attention=1 · user 42' }]);
+  }, { writes: { check: async () => ({ ok: true, checks: [{ id: 'a', title: 'A', status: 'pass' }, { id: 't', title: 'Tasks', status: 'fail', fix: 'Move the user to a full licence' }] }) } });
+  await withServer(async (url, _l, _c, w) => {
+    const html = await (await post(url, '/app/api/check', {})).text();
+    assert.ok(html.includes('Check not completed') && html.includes('Salesforce did not accept the connection'));
+    assert.deepEqual(w.audits, [{ action: 'setup_checked', shop: SHOP, detail: 'not_completed auth · user 42' }]);
+  }, { writes: { check: async () => ({ ok: false, reason: 'auth' }) } });
+});
+
+test('per-store limits: Salesforce calls are limited hardest, writes more loosely, reads not at all, and one store never uses another store\'s allowance', async () => {
+  await withServer(async (url, logs) => {
+    const codes: number[] = [];
+    for (let i = 0; i < 11; i++) codes.push((await post(url, '/app/api/check', {})).status);
+    assert.deepEqual(codes, [...Array(10).fill(200), 429]);
+    const refused = await post(url, '/app/api/verify', {});
+    assert.equal(refused.status, 429, 'test connection shares the Salesforce allowance');
+    assert.ok(Number(refused.headers.get('retry-after')) > 0);
+    assert.equal((await refused.text()), 'too many requests');
+    assert.equal((await post(url, '/app/api/recipe', { action: 'disable' })).status, 200, 'the kill switch is a different allowance: never locked out by a busy check');
+    for (let i = 0; i < 5; i++) assert.equal((await fetch(`${url}/app/api/home`, { headers: bearer(token()) })).status, 200, 'reads are not limited');
+    assert.ok(logs.some((l) => l.startsWith('embedded_rate_limited')));
+  }, { known: async () => true });
+  await withServer(async (url) => {
+    for (let i = 0; i < 10; i++) await post(url, '/app/api/check', {});
+    assert.equal((await post(url, '/app/api/check', {})).status, 429);
+    assert.equal((await post(url, '/app/api/check', {}, { ...bearer(token({ iss: 'https://b-shop.myshopify.com/admin', dest: 'https://b-shop.myshopify.com' })), ...FORM })).status, 200, 'another store has its own allowance');
+  }, { known: async () => true });
+});
+
+const dry = (n: number) => async () => Array.from({ length: n }, () => entry());
+
+test('merchant go-live is refused unless the operator allowed it; allowed, it needs every readiness item and the word LIVE, and is audited with the user', async () => {
+  // not allowed (the default): 403, nothing written, even with everything ready
+  await withServer(async (url, _l, _c, w) => {
+    w.connections.put(SHOP, { loginUrl: 'https://x.my.salesforce.com', clientId: 'C', clientSecret: 'S' });
+    const r = await post(url, '/app/api/recipe', { action: 'go_live', confirm: 'LIVE' });
+    assert.equal(r.status, 403);
+    assert.ok(!(await r.text()).includes('Go live'));
+    assert.deepEqual(w.audits, []);
+  }, { data: { recent: dry(5) } });
+  // allowed but not ready (too few dry-run decisions): 422, mode untouched
+  await withServer(async (url, _l, _c, w) => {
+    await w.connections.put(SHOP, { loginUrl: 'https://x.my.salesforce.com', clientId: 'C', clientSecret: 'S' });
+    const page = await (await fetch(`${url}/app/api/setup`, { headers: bearer(token()) })).text();
+    assert.ok(page.includes('Go live') && page.includes('not yet') && !page.includes('Type LIVE to confirm'), 'the form appears only when ready');
+    const r = await post(url, '/app/api/recipe', { action: 'go_live', confirm: 'LIVE' });
+    assert.equal(r.status, 422);
+    assert.ok((await r.text()).includes('Not ready to go live yet'));
+    assert.equal(w.settings.get(`${SHOP}|R`)?.dryRun ?? true, true);
+    assert.deepEqual(w.audits, []);
+  }, { goLive: { minDryRun: 3 }, data: { recent: dry(2) } });
+  // allowed and ready: needs the word; then it goes live and is audited
+  await withServer(async (url, _l, _c, w) => {
+    await w.connections.put(SHOP, { loginUrl: 'https://x.my.salesforce.com', clientId: 'C', clientSecret: 'S' });
+    const page = await (await fetch(`${url}/app/api/setup`, { headers: bearer(token()) })).text();
+    assert.ok(page.includes('Type LIVE to confirm'));
+    const noWord = await post(url, '/app/api/recipe', { action: 'go_live', confirm: 'live' });
+    assert.equal(noWord.status, 400);
+    assert.notEqual(w.settings.get(`${SHOP}|R`)?.dryRun, false);
+    const ok = await post(url, '/app/api/recipe', { action: 'go_live', confirm: 'LIVE' });
+    assert.equal(ok.status, 200);
+    assert.equal(w.settings.get(`${SHOP}|R`)?.dryRun, false);
+    assert.deepEqual(w.audits, [{ action: 'recipe_live', shop: SHOP, detail: 'user 42' }]);
+  }, { goLive: { minDryRun: 3 }, data: { recent: dry(3) } });
+});
+
+test('a store that is already live sees the LIVE banner and a way back to dry-run, not the go-live form', async () => {
+  await withServer(async (url) => {
+    const page = await (await fetch(`${url}/app/api/setup`, { headers: bearer(token()) })).text();
+    assert.ok(page.includes('writing Leads and Tasks to your Salesforce') && page.includes('back to dry-run') && !page.includes('Type LIVE to confirm'));
+  }, { goLive: { minDryRun: 1 }, data: { summary: async () => ({ connection: { stored: true, lastVerifiedAt: 'x' }, recipe: { name: 'R1', configured: true, enabled: true, dryRun: false } }) } });
+});
+
+test('reading the decision log or the privacy records is audited with the user; other pages are not', async () => {
+  await withServer(async (url, _l, _c, w) => {
+    for (const p of ['home', 'setup', 'settings', 'jobs', 'guide']) assert.equal((await fetch(`${url}/app/api/${p}`, { headers: bearer(token()) })).status, 200);
+    assert.deepEqual(w.audits, []);
+    await fetch(`${url}/app/api/log`, { headers: bearer(token()) });
+    await fetch(`${url}/app/api/privacy?id=7`, { headers: bearer(token()) });
+    assert.deepEqual(w.audits, [{ action: 'viewed_log', shop: SHOP, detail: 'user 42' }, { action: 'viewed_privacy', shop: SHOP, detail: 'user 42' }]);
+    assert.equal((await fetch(`${url}/app/api/log`)).status, 401);
+    assert.equal(w.audits.length, 2, 'a refused request leaves no entry');
+  });
 });
