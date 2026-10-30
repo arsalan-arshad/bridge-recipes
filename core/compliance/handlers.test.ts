@@ -65,7 +65,7 @@ async function seed(c: { rt: Rt; schema: string }) {
   // a legacy mapping written before the shop column existed
   await rt.pool.query(`INSERT INTO ${schema}.entity_map (match_key, sf_type, sf_id, shop) VALUES ($1, 'Lead', '00Q1003', NULL)`, [`r1:${gid(1003)}`]);
   await log.record(entry(A, 1003));
-  // a dead-lettered job for order 1001 (holds the raw payload for 14 days)
+  // a dead-lettered job for order 1001 (holds the payload for 7 days)
   await rt.boss.send(WEBHOOK_DEAD_QUEUE, orderJob(A, 1001, 'wh-dead-1001'));
   for (const shop of [A, B]) {
     await rt.pool.query(`INSERT INTO ${schema}.recipe_config (shop, recipe_id, enabled, dry_run, config) VALUES ($1, 'r1', true, false, '{"leadSource":"x"}')`, [shop]);
