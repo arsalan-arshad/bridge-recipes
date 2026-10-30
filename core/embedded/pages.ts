@@ -315,7 +315,7 @@ export function jobsFragment(d: JobsData): string {
 <s-section><s-paragraph>${view('/app/api/home', 'Back to home')}</s-paragraph></s-section>
 ${note}${problems}
 <s-section padding="none">${table}</s-section>
-<s-section><s-paragraph><s-text color="subdued">These jobs failed after all retries. Replaying moves a job back to the queue (for example after fixing the Salesforce connection). The order payload is kept for 14 days and is never shown here. You can only replay this store's jobs.</s-text></s-paragraph>${all}</s-section></s-page>`;
+<s-section><s-paragraph><s-text color="subdued">These jobs failed after all retries. Replaying moves a job back to the queue (for example after fixing the Salesforce connection). The order payload is kept for 7 days and is never shown here. You can only replay this store's jobs.</s-text></s-paragraph>${all}</s-section></s-page>`;
 }
 
 // ---- first-run guide: what is left to do before the recipe is working (shown on the home page) ----------------------------------------------
