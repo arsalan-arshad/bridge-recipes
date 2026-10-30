@@ -211,11 +211,18 @@ export function createAdminHandler(deps: AdminDeps): (req: IncomingMessage, res:
       return redirect(res, `/admin/shops/${shop}?msg=shop_added`);
     }
 
-    if (path === '/admin/compliance' && req.method === 'GET') return send(res, 200, compliancePage({ csrf, entries: await deps.compliance.recent(100) }));
+    // Shopify's level 2 rules ask for an access log of customer-derived data: reading the decision log and the privacy records is recorded.
+    if (path === '/admin/compliance' && req.method === 'GET') {
+      const entries = await deps.compliance.recent(100);
+      await audit('viewed_privacy');
+      return send(res, 200, compliancePage({ csrf, entries }));
+    }
     const cm = /^\/admin\/compliance\/([0-9]{1,12})$/.exec(path);
     if (cm && req.method === 'GET') {
       const entry = await deps.compliance.get(Number(cm[1]));
-      return entry ? send(res, 200, complianceDetailPage({ csrf, entry })) : errorPage(res, 404, 'Not found');
+      if (!entry) return errorPage(res, 404, 'Not found');
+      await audit('viewed_privacy', entry.shop);
+      return send(res, 200, complianceDetailPage({ csrf, entry }));
     }
 
     if (path === '/admin/replay') {
@@ -239,6 +246,7 @@ export function createAdminHandler(deps: AdminDeps): (req: IncomingMessage, res:
       const outcome = OUTCOMES.has(outcomeRaw) ? outcomeRaw : '';
       const page = Math.min(Math.max(Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1, 1), 2000);
       const rows = await deps.syncLog.recent({ shop, outcome: outcome || undefined, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE });
+      await audit('viewed_log', shop);
       return send(res, 200, logPage({ csrf, shop, entries: rows.slice(0, PAGE_SIZE), outcome, page, hasNext: rows.length > PAGE_SIZE }));
     }
 
