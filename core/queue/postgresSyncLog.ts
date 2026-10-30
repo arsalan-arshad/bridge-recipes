@@ -8,8 +8,14 @@ import type { LogEntry, SyncLog } from '../worker/syncLog.ts';
 type Pool = { query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }> };
 
 // Mask any email whose local part is not already masked ("a***@domain").
+// Linear time: split into runs of non-delimiter characters first, then look at each run once (the earlier single regex backtracked
+// quadratically on long runs without an "@").
 export function scrubEmails(text: string): string {
-  return text.replace(/([^\s"'\\@<>,;]*)@([^\s"'\\<>,;]+)/g, (m, local: string) => (local.endsWith('***') ? m : redactEmail(m)));
+  return text.replace(/[^\s"'\\<>,;]+/g, (token) => {
+    const at = token.indexOf('@');
+    if (at === -1 || at === token.length - 1) return token; // no "@", or nothing after it
+    return token.slice(0, at).endsWith('***') ? token : redactEmail(token);
+  });
 }
 
 export interface LogFilter {
