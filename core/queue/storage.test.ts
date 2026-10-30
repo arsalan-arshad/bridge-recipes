@@ -194,3 +194,18 @@ test('config store: an invalid config is rejected on write and nothing is stored
     assert.deepEqual(flagged, [`s.myshopify.com|${R1_ID}`]);
   });
 });
+
+test('scrubEmails edge cases', () => {
+  const cases: [string, string][] = [
+    ['a@b', 'a***@b'], ['@x', '***'], ['a@', 'a@'], ['@', '@'], ['a@@b', '***'], ['a***@b', 'a***@b'],
+    ['x a@b.c,d@e.f;g@h', 'x a***@b.c,d***@e.f;g***@h'], ['"a@b"', '"a***@b"'], ['<a@b>', '<a***@b>'], ['no email here', 'no email here'],
+  ];
+  for (const [input, expected] of cases) assert.equal(scrubEmails(input), expected, input);
+});
+
+test('scrubEmails stays fast on a long run with no "@" (no quadratic blow-up)', () => {
+  const t0 = Date.now();
+  scrubEmails('a'.repeat(200_000) + '!' + '@'.repeat(50) + 'b'.repeat(200_000));
+  scrubEmails('x'.repeat(500_000));
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+});
