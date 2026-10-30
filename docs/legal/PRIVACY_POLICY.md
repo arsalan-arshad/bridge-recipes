@@ -20,7 +20,7 @@ controller. For the merchant's own contact data (the store domain, the Shopify a
 | Decision log: order id, outcome, reason, and the planned Salesforce operation **with the email masked** (`a***@domain`) | Computed by us | So the merchant can see what the app decided | Our database |
 | Salesforce My Domain URL, consumer key, consumer secret | Entered by the merchant | To connect to the merchant's Salesforce | Our database, secret **encrypted** (AES-256-GCM) |
 
-While an order waits to be processed, a **reduced copy of the order notification** (only the order id, name, total, currency, product titles, the customer's email and last name, the billing company, and the marketing-consent flag; addresses, phone numbers and payment details are dropped on arrival) is held in our job queue. Jobs queued before 2026-10-29 may hold the full notification until they expire. It is deleted **one hour after processing succeeds**. If processing keeps failing, the job is kept **up to 14 days** so it can be replayed, then deleted. After that we keep only the masked decision log. We do **not** sell personal data, we do **not** use it for
+While an order waits to be processed, a **reduced copy of the order notification** (only the order id, name, total, currency, product titles, the customer's email and last name, the billing company, and the marketing-consent flag; addresses, phone numbers and payment details are dropped on arrival) is held in our job queue. Jobs queued before 2026-10-29 may hold the full notification until they expire. It is deleted **one hour after processing succeeds**. If processing keeps failing, the job is kept **up to 7 days** so it can be replayed, then deleted. After that we keep only the masked decision log. We do **not** sell personal data, we do **not** use it for
 advertising, and we do not use it for any purpose other than the one in the table.
 
 ## Customer consent
@@ -29,7 +29,7 @@ this in the recipe settings). An order without consent is skipped.
 
 ## Retention
 Decision log 30 days, webhook receipts 14 days, record links to Salesforce 30 days, compliance records 365 days (defaults; the
-operator can shorten them). Queued order notifications: 1 hour after success, up to 14 days if processing failed (see above). The Salesforce connection is deleted when the app is
+operator can shorten them). Queued order notifications: 1 hour after success, up to 7 days if processing failed (see above). The Salesforce connection is deleted when the app is
 uninstalled; everything else about the store is erased when Shopify sends the `shop/redact` request (48 hours after uninstall).
 Customer requests (`customers/redact`, `customers/data_request`) are honoured as Shopify sends them.
 
