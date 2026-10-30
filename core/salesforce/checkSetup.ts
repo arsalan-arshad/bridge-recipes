@@ -38,7 +38,7 @@ function tooBroad(d: ObjectDescribe, id: string, title: string, flags: ('createa
   const extra = flags.filter((f) => d[f] === true).map((f) => verb[f]);
   return extra.length === 0
     ? { id, title, status: 'pass' }
-    : { id, title, status: 'warn', fix: `The integration user can ${extra.join(' and ')} here, which Bridge Recipes never needs. Remove it from the permission set, or check that the app's Run As user is the integration user and not an administrator.` };
+    : { id, title, status: 'warn', fix: `The integration user can ${extra.length > 1 ? `${extra.slice(0, -1).join(', ')} and ${extra[extra.length - 1]}` : extra[0]} here, which Bridge Recipes never needs. Remove it from the permission set, or check that the app's Run As user is the integration user and not an administrator.` };
 }
 
 export function evaluateSetup(d: Describes): SetupCheck[] {
