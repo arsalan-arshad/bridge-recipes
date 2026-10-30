@@ -44,7 +44,9 @@ test('permissions broader than needed are a warning, not a failure', () => {
   const r = byId(d);
   assert.equal(r.lead.status, 'pass');
   assert.equal(r.lead_delete.status, 'warn');
-  assert.ok(r.account_write.fix?.includes('create and edit'));
+  assert.ok(r.account_write.fix?.includes('can create and edit here'));
+  const three = byId({ ...good(), Account: { ...(d.Account as ObjectDescribe), createable: true, updateable: true, deletable: true } });
+  assert.ok(three.account_write.fix?.includes('can create, edit and delete here'));
   assert.equal(r.contact_write.status, 'warn');
   assert.equal(r.account.status, 'pass');
 });

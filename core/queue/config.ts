@@ -19,7 +19,7 @@ export const DEFAULT_POLICY: RetryPolicy = {
   retryDelaySeconds: 30,
   retryDelayMaxSeconds: 3600,
   completedRetentionSeconds: 3600,
-  deadRetentionSeconds: 14 * 24 * 3600,
+  deadRetentionSeconds: 7 * 24 * 3600,
   expireInSeconds: 300,
 };
 

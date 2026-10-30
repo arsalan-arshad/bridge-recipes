@@ -11,7 +11,7 @@ the honest state of this repository and the single Railway deployment; "not veri
 | Limit processing to the stated purposes | **Yes**, by design (R1 only) |
 | Respect customer consent | **Yes**: marketing-consent filter on by default |
 | Respect opt-outs of data sale | Not applicable: nothing is sold or shared |
-| Do not keep data longer than needed | **Mostly**: log retention 14 to 365 days, configurable; queued orders 1 hour to 14 days; erased on `shop/redact` |
+| Do not keep data longer than needed | **Mostly**: log retention 14 to 365 days, configurable; queued orders 1 hour to 7 days; erased on `shop/redact` |
 | Encrypt data in transit | **Yes** (HTTPS at the host) |
 | Encrypt data at rest | Salesforce secrets: **yes** (AES-256-GCM in the app). Database disk encryption: **not verified** (provider) |
 | Encrypt backups | **Not verified**; no backup or restore has been set up or tested |
@@ -19,13 +19,11 @@ the honest state of this repository and the single Railway deployment; "not veri
 | Data loss prevention strategy | **Partly**: minimised data, no bulk export feature, secrets never shown; no formal strategy document |
 | Limit staff access | One operator today. Provider account protections (two-step sign-in on Railway, GitHub, Shopify Partners, Salesforce): **not verified** |
 | Strong passwords for staff accounts | Operator admin password minimum 12 characters; **others not verified** |
-| Access log for protected customer data | **Yes for the app pages**: changes and reads of the decision log and privacy records are audited with the Shopify user (`admin_audit`). The operator's own `/admin` pages do not log reads yet |
+| Access log for protected customer data | **Yes**: changes and reads of the decision log and privacy records are audited (`admin_audit`), in the app with the Shopify user and on the operator `/admin` pages |
 | Incident response policy | **Draft** (`docs/legal/INCIDENT_RESPONSE.md`); never rehearsed |
 
 ## To do before submitting to the App Store
 1. Fill the square-bracket items, have a lawyer read `docs/legal/`, publish the policy and terms at public URLs.
 2. Verify and document: database encryption, backups and a restore test, two-step sign-in on every account that can reach data.
-3. Log reads on the operator `/admin` pages too.
-4. Add a staging service so tests never touch production data.
-5. Consider shortening failed-job retention (14 days).
-6. Request protected customer data access in the Partner Dashboard with the minimum fields, and prepare for a data protection review.
+3. Add a staging service so tests never touch production data.
+4. Request protected customer data access in the Partner Dashboard with the minimum fields, and prepare for a data protection review.

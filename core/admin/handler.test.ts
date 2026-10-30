@@ -635,3 +635,25 @@ test('the log shows each decision\'s Shopify webhook id (an opaque delivery id),
     }
   });
 });
+
+test('reading the decision log or the privacy records is audited; other pages and refused requests are not', async () => {
+  const compliance = { async recent() { return [complianceEntry()]; }, async get(id: number) { return id === 7 ? complianceEntry() : null; } };
+  await withAdmin(async ({ b, req }) => {
+    await req.get(`/admin/shops/${SHOP}/log`);
+    assert.deepEqual(b.audit, [], 'not logged in: nothing recorded');
+    await req.login();
+    const base = b.audit.length;
+    await req.get('/admin');
+    await req.get(`/admin/shops/${SHOP}`);
+    assert.equal(b.audit.length, base, 'dashboard and shop pages show no customer-derived data');
+    await req.get(`/admin/shops/${SHOP}/log`);
+    await req.get('/admin/compliance');
+    await req.get('/admin/compliance/7');
+    await req.get('/admin/compliance/999');
+    assert.deepEqual(b.audit.slice(base), [
+      { action: 'viewed_log', shop: SHOP, detail: undefined },
+      { action: 'viewed_privacy', shop: undefined, detail: undefined },
+      { action: 'viewed_privacy', shop: SHOP, detail: undefined },
+    ]);
+  }, { compliance });
+});

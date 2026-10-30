@@ -143,7 +143,7 @@ export function replayPage(d: { csrf: string; msg?: string | null; jobs: DeadJob
     title: 'Failed jobs',
     csrf: d.csrf,
     body: `${message(d.msg)}<h1>Failed jobs</h1>
-<p class="mut">These jobs failed after all retries. Replaying moves a job back to the queue (for example after fixing the Salesforce connection). The order payload is kept for 14 days and is not shown here.</p>
+<p class="mut">These jobs failed after all retries. Replaying moves a job back to the queue (for example after fixing the Salesforce connection). The order payload is kept for 7 days and is not shown here.</p>
 <div class="card"><table><tr><th>Failed (UTC)</th><th>Shop</th><th>Topic</th><th>Order</th><th></th></tr>${rows || '<tr><td colspan="5" class="mut">No failed jobs.</td></tr>'}</table></div>
 ${d.jobs.length ? `<form method="post" action="/admin/replay">${csrfField(d.csrf)}<input type="hidden" name="id" value="all"><button class="primary" type="submit">Replay all (${d.jobs.length})</button></form>` : ''}`,
   });
