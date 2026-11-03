@@ -21,17 +21,23 @@ Reply with: (1) the legal name or your own name to publish, (2) the country for 
 - **Retention:** decision log 30 days with the email masked; queued notification 1 hour after success or 7 days if it failed; erased on `shop/redact`; credentials deleted on uninstall.
 - **Safeguards:** HTTPS; signature checked on every webhook; Shopify session token checked on every in-app request; Salesforce secrets encrypted at rest; access to the log audited.
 
-## 4. Review notes (paste)
-Bridge Recipes spots business buyers in paid orders and, once the merchant turns it live, creates Leads or Tasks in the merchant's own Salesforce.
-1. Install the app and open it from Apps. The home page shows a "Get started" checklist.
-2. Open **Salesforce setup guide**. For review we pre-configured a Salesforce Developer org: open **Set up** and press **Test connection** (already saved), then the guide's **Check my setup** (all "ok").
-3. Place a paid test order for a customer with a company email and the marketing box ticked. Within a minute the **Decision log** shows a `dry_run` row: nothing was written (the recipe starts in dry-run).
-4. To see a write: on Set up, once the readiness list is complete, press **Go live**, type LIVE, place another test order, and look for the new Lead in Salesforce (credentials in the form). Press **Stop writing** or the kill switch to stop.
-5. Uninstall: the recipe is disabled and the Salesforce credentials are deleted immediately; the rest is erased when Shopify sends the privacy request.
-Test credentials for the Salesforce org go in the submission form only.
+## 4. Review notes (paste; 1877 of 2800 characters)
+Bridge Recipes spots business buyers in paid orders and, once the merchant turns it live, creates Leads or Tasks in the merchant's own Salesforce. Each store starts empty: nothing is pre-configured for you.
+1. Install the app and open it from Apps. Home shows a "Get started" checklist (recipe R1 is off).
+2. Press "Set up Salesforce and the recipe". Enter the My Domain URL (in the account description), the Consumer key (test-account username) and the Consumer secret (test-account password), then press "Save connection" and "Test connection". No Salesforce sign-in, 2FA or one-time code is involved: the app uses the Salesforce Client Credentials flow.
+3. Open "Salesforce setup guide" and press "Check my setup". All 7 checks should show "ok". It only reads; it writes nothing to Salesforce.
+4. On Set up press "Enable in dry-run".
+5. Place a paid test order for a customer with a company email (not gmail, yahoo etc.) with the marketing box ticked. Within a minute "Latest decisions" shows a dry_run row. Dry-run means the app decided it would create a Lead and wrote nothing. Emails are masked in the log.
+6. Going live (writing to Salesforce) is an operator-only step on a separate admin page protected by a password; it is not done inside the app. You will therefore see dry_run decisions only. This does not limit what you can review: install, connection, setup check, decisions, settings, privacy pages and uninstall.
+7. "Recipe settings": minimum order total, marketing-consent filter (on by default), domain lists. "Kill switch: disable" stops all processing.
+8. Uninstall: the recipe is disabled, the stored Salesforce credentials are deleted and queued jobs are removed immediately. Shopify then sends the shop erasure request (about 48 hours later) and the app erases everything else it holds for the store.
+Test-account credentials are in the form fields only.
+
+**Account description for the test-account fields (222 of 255 characters; put the My Domain URL in place of the placeholder):**
+Username = Consumer key, Password = Consumer secret. Enter both on the app's Set up page with the My Domain URL <MY_DOMAIN_URL>. No Salesforce sign-in, 2FA or OTP step is involved: the app uses the Client Credentials flow.
 
 ## 5. Screencast script (2 to 3 minutes, English)
-1. Install from the Partner dashboard (10 s). 2. Open the app, show the checklist (10 s). 3. Open the guide, press Check my setup, all "ok" (30 s). 4. Place a paid test order, show the dry-run decision and the masked email (40 s). 5. Settings: minimum order total and consent (15 s). 6. Go live, place an order, show the Lead in Salesforce (40 s). 7. Kill switch and uninstall (15 s).
+1. Install from the Partner dashboard (10 s). 2. Open the app, show the checklist (10 s). 3. Open the guide, press Check my setup, all "ok" (30 s). 4. Place a paid test order, show the dry-run decision and the masked email (40 s). 5. Settings: minimum order total and consent (15 s). 6. Open the dry-run decision and show the planned Lead and masked email; say that going live is an operator-only step (30 s). 7. Kill switch and uninstall (15 s).
 
 ## 6. Assets
 - App icon, 1200 x 1200: `docs/listing/app-icon.png` (source `app-icon.svg`).

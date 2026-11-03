@@ -35,9 +35,12 @@ Use only the development store; mask or avoid real emails (the app already masks
 ## What the reviewer needs
 - A **demo / test store link** and a one-page instruction: install, open the app, follow the guide, place a paid test order, read the decision.
 - **Working Salesforce test credentials with full access** (Shopify asks for valid credentials for third-party platforms): a dedicated
-  Developer Edition org already set up as in `docs/SETUP_SALESFORCE.md` (full-licence integration user, permission set, External Client
-  App). Give the reviewer the My Domain URL, consumer key and secret in the submission form only, never in this repository, and rotate them after review.
-- A **screencast** (English) of: install, set-up guide, connection test, dry-run order, decision, going live, kill switch, uninstall.
+  Developer Edition org set up as in `docs/SETUP_SALESFORCE.md` (full-licence integration user, permission set, External Client
+  App). Nothing is pre-configured in the reviewer's store: the reviewer enters the connection on the app's Set up page. Test-account fields:
+  username = Consumer key, password = Consumer secret, and the account description (see `docs/SUBMISSION_PACK.md` section 4) says to enter
+  them on Set up with the My Domain URL; no sign-in or 2FA step exists (Client Credentials flow). Put them in the submission form only, never in this repository, and rotate them after review.
+  **Before submitting:** set `OPEN_REGISTRATION=true` (and `MAX_SHOPS`) on Railway: otherwise a store the operator has not added gets 403 when the reviewer opens the app.
+- A **screencast** (English) of: install, set-up guide, connection test, dry-run order, decision, kill switch, uninstall (going live is operator-only and is not shown).
   Show the expected result for each test case.
 - Compliance webhooks are subscribed; the endpoint verifies signatures and answers 401 to a bad one (checked on the live service).
 - Protected customer data: request name and email in the Partner Dashboard with the reason from `docs/legal/PRIVACY_POLICY.md`
