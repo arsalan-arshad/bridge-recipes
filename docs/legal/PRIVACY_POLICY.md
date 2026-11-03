@@ -13,6 +13,7 @@ Bridge Recipes ("the app") connects a Shopify store to the store owner's own Sal
 controller. For the merchant's own contact data (the store domain, the Shopify account user id) we are the controller.
 
 ## What we process, and why
+
 | Data | Source | Why | Where it goes |
 |---|---|---|---|
 | Store domain (`example.myshopify.com`) | Shopify | To know which store a request belongs to | Our database |
@@ -45,8 +46,8 @@ platforms. No analytics, advertising, error-tracking or email services are used 
 ## Security
 Transport encryption (HTTPS); Shopify webhook signatures verified before any parsing; Shopify session tokens verified on every request
 inside the app; Salesforce secrets encrypted at rest; access to the operator admin page protected by a password of at least 12
-characters; stored data minimised and emails masked in logs. No system is perfectly secure; see the incident process in
-`docs/legal/INCIDENT_RESPONSE.md`.
+characters; stored data minimised and emails masked in logs. No system is perfectly secure. To report a security problem, email arsalanarshad.dev@gmail.com; if personal data is affected we will tell the
+stores concerned without undue delay.
 
 ## Your rights
 A store's customer should ask the store. The store can ask us (address above) and we will help it respond. Merchants can erase their

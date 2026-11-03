@@ -21,4 +21,4 @@ Last updated: 2026-11-03. Not legal advice. The software is MIT-licensed open so
 5. **Data.** See the privacy policy. On uninstall we disable the recipe and delete your stored Salesforce credentials immediately, and
    erase the rest when Shopify requests it.
 6. **Support.** By email: arsalanarshad.dev@gmail.com. Best effort.
-7. **Governing law.** The laws of [COUNTRY OF THE OPERATOR], and its courts, unless a mandatory consumer or data-protection law of the merchant's country says otherwise.
+7. **Governing law.** The laws of the country where the operator lives, and that country's courts, unless a mandatory consumer or data-protection law of the merchant's country says otherwise.
