@@ -4,11 +4,10 @@
 > items are decisions the operator must make before publishing. Publish it at a public URL and put that URL in the Shopify App Store
 > listing.
 
-Last updated: [date]. Contact for everything in this policy: arsalanarshad.dev@gmail.com
+Last updated: 2026-11-03. Contact for everything in this policy: arsalanarshad.dev@gmail.com
 
 ## Who we are
-Bridge Recipes ("the app") connects a Shopify store to the store owner's own Salesforce org. The service is operated by [legal name or
-individual, country]. For the personal data of a store's customers we act as a **processor** for the store (the merchant), who is the
+Bridge Recipes ("the app") connects a Shopify store to the store owner's own Salesforce org. The service is operated by Arsalan Arshad, an individual (the "operator"). For the personal data of a store's customers we act as a **processor** for the store (the merchant), who is the
 controller. For the merchant's own contact data (the store domain, the Shopify account user id) we are the controller.
 
 ## What we process, and why
@@ -38,8 +37,8 @@ Records the app writes to the merchant's Salesforce belong to the merchant. We c
 permission); after an erasure request the app lists the records the merchant should review there.
 
 ## Sub-processors and location
-[Hosting provider: Railway, region ___]. [Database: PostgreSQL on the same provider.] Shopify and Salesforce are the merchant's own
-platforms. No analytics or advertising services are used. [Confirm before publishing.]
+Hosting and database: Railway (one service and one PostgreSQL database on the same provider), region [REGION: read from the Railway service settings]. Shopify and Salesforce are the merchant's own
+platforms. No analytics, advertising, error-tracking or email services are used (the only outbound connection the service makes is to the merchant's own Salesforce domain).
 
 ## Security
 Transport encryption (HTTPS); Shopify webhook signatures verified before any parsing; Shopify session tokens verified on every request
@@ -49,7 +48,7 @@ characters; stored data minimised and emails masked in logs. No system is perfec
 
 ## Your rights
 A store's customer should ask the store. The store can ask us (address above) and we will help it respond. Merchants can erase their
-data by uninstalling the app. [Add the rights and complaint-authority wording that applies in your jurisdiction.]
+data by uninstalling the app. Depending on where they live, individuals may have rights to access, correct, delete or object to the use of their personal data, and to complain to their local data protection authority. We act on the store's instructions and will help the store answer such requests; we respond to the store's own requests within 30 days.
 
 ## Changes
-We will update this page and the date above. [Notify merchants of material changes by email to the Shopify store contact.]
+We will update this page and the date above. For material changes we will email the Shopify store contact and show a notice in the app.
