@@ -9,11 +9,11 @@
    permissions you create for the app; the consent you collect from your customers; and reviewing dry-run decisions before going live.
    You can stop the app at any time with the kill switch or by uninstalling.
 3. **Free service, no guarantee.** The hosted service is provided free of charge and "as is", without warranty or a service level.
-   [Add a limitation of liability valid in your jurisdiction.] It may be changed, limited (for example by a cap on the number of
-   stores) or discontinued; we will give [30] days' notice where we can.
+   To the extent the law allows, the operator is not liable for indirect or lost-profit damages, or for leads that were or were not created, and total liability is limited to the amount paid for the service (nothing, as it is free). It may be changed, limited (for example by a cap on the number of
+   stores) or discontinued; we will give 30 days' notice where we can.
 4. **Acceptable use.** No attempts to access other stores' data, to overload the service, or to use it to send data you may not lawfully
    process.
 5. **Data.** See the privacy policy. On uninstall we disable the recipe and delete your stored Salesforce credentials immediately, and
    erase the rest when Shopify requests it.
 6. **Support.** By email: arsalanarshad.dev@gmail.com. Best effort.
-7. **Governing law.** [Jurisdiction.]
+7. **Governing law.** The laws of [COUNTRY OF THE OPERATOR], and its courts, unless a mandatory consumer or data-protection law of the merchant's country says otherwise.

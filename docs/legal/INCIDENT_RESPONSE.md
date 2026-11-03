@@ -18,8 +18,8 @@ operation; adapt it if more people join. It has not been rehearsed.
    `ENCRYPTION_KEY` plan (stored secrets must be re-entered by merchants) and the Shopify client secret
    (https://shopify.dev/docs/apps/build/authentication-authorization/manage-credentials).
 2. **Assess (same day).** What data, which stores, since when. Evidence: the service log, `admin_audit`, Railway and GitHub audit logs.
-3. **Notify.** Affected merchants by email without undue delay (and within any legal deadline that applies: [confirm, e.g. 72 hours
-   for personal-data breaches under GDPR]); Shopify through the Partner support channel; regulators where required. Tell merchants to
+3. **Notify.** Affected merchants by email without undue delay (and within any legal deadline that applies: for example 72 hours
+   for personal-data breaches under GDPR); Shopify through the Partner support channel; regulators where required. Tell merchants to
    rotate the consumer secret of their External Client App.
 4. **Fix and verify.** Patch, add a test, deploy, confirm.
 5. **Review (within a week).** Write what happened and what changes; append it to `PROJECT_CONTEXT.md` without personal data.
