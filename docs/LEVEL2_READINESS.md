@@ -12,11 +12,11 @@ the honest state of this repository and the single Railway deployment; "not veri
 | Respect customer consent | **Yes**: marketing-consent filter on by default |
 | Respect opt-outs of data sale | Not applicable: nothing is sold or shared |
 | Do not keep data longer than needed | **Mostly**: log retention 14 to 365 days, configurable; queued orders 1 hour to 7 days; erased on `shop/redact` |
-| Encrypt data in transit | **Yes** (HTTPS at the host) |
-| Encrypt data at rest | Salesforce secrets: **yes** (AES-256-GCM in the app). Database disk encryption: **not verified** (provider) |
-| Encrypt backups | **No.** There are no backups. The Railway plan in use has none and the owner cannot buy Pro; a weekly encrypted manual dump was designed and then dropped on 2026-11-03 (not built, nothing to restore from). The data is small and mostly recreated from Shopify and Salesforce, but the decision log, settings, stored connections and privacy records are lost if the database is lost. Shopify lists encrypted backups under level 2, so this is a known gap a review may raise |
-| Keep test and production data separate | **Partly**: local development uses a local database; the only hosted service is "production" and is used with a development store. A staging service is not set up |
-| Data loss prevention strategy | **Partly**: minimised data, no bulk export feature, secrets never shown; no formal strategy document |
+| Encrypt data in transit | **Done.** HTTPS with TLS 1.2 or 1.3 on public endpoints, database reached over Railway's private network with public access off ([Railway security](https://docs.railway.com/enterprise/security), read 2026-11-04) |
+| Encrypt data at rest | **Done, by the provider's statement.** Railway states all data stored on it, including volumes, is encrypted at rest with AES-256 ([Railway security](https://docs.railway.com/enterprise/security), read 2026-11-04); the Railway settings page does not show it, so it is not independently verified. Salesforce secrets are additionally encrypted in the app (AES-256-GCM) |
+| Encrypt backups | **No.** There are no backups. The Railway plan in use has none and the owner cannot buy Pro; a weekly encrypted manual dump was designed and then dropped on 2026-11-03 (not built, nothing to restore from). The data is small and mostly recreated from Shopify and Salesforce, but the decision log, settings, stored connections and privacy records are lost if the database is lost. Shopify lists encrypted backups under level 2, so this is a known gap a review may raise. Options (owner's decision): a Railway plan that includes volume backups and point-in-time recovery, or manual dumps; see `docs/DATA_LOSS_PREVENTION.md` |
+| Keep test and production data separate | **Still open.** Local development uses a local database; the only hosted service is production. Option: a second Railway service as staging |
+| Data loss prevention strategy | **Documented** in `docs/DATA_LOSS_PREVENTION.md`: what exists, and the gaps (no backups, no staging) |
 | Limit staff access | One operator today. Two-step sign-in on Railway, GitHub, Shopify Partners and Salesforce: **not claimed**; nobody has checked that it is on |
 | Strong passwords for staff accounts | Operator admin password minimum 12 characters; **others not verified** |
 | Access log for protected customer data | **Yes**: changes and reads of the decision log and privacy records are audited (`admin_audit`), in the app with the Shopify user and on the operator `/admin` pages |
@@ -25,7 +25,7 @@ the honest state of this repository and the single Railway deployment; "not veri
 ## To do before submitting to the App Store
 1. Fill the square-bracket items, have a lawyer read `docs/legal/`, publish the policy and terms at public URLs.
 2. Verify and document: database encryption at rest, two-step sign-in on every account that can reach data. Decide how to answer the backup gap (buy a plan with backups, or a different host) or state it plainly to the reviewer; there is no restore test because there is nothing to restore.
-3. Add a staging service so tests never touch production data.
+3. Add a staging service (a second Railway service) so tests never touch production data, and decide on backups (a plan that includes them).
 4. Request protected customer data access in the Partner Dashboard with the minimum fields, and prepare for a data protection review.
 
 ## Protected-data questionnaire: saved as a draft in the Partner Dashboard on 2026-11-03 (not submitted)
