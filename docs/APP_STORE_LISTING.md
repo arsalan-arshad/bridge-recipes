@@ -22,6 +22,8 @@ Nothing here has been submitted. Submitting is the owner's decision. Rules are s
 - **Support:** arsalanarshad.dev@gmail.com. **Privacy policy URL:** https://arsalan-arshad.github.io/bridge-recipes/legal/PRIVACY_POLICY.html (live once Pages is on); terms: .../legal/TERMS_OF_USE.html.
 - **Install eligibility:** "doesn't require Online Store or POS" (the app only reads orders); no country limits.
 
+Image files in `docs/listing/`: `feature-1600x900.png` (the App Store feature image / video thumbnail), `readme-banner-1280x640.png` (README banner and GitHub social preview) and `app-icon.png`/`.svg`. They are text and shapes only: no logos of other companies, no personal data.
+
 ## Images (all 1600 x 900, 16:9, no pricing, no personal data, alt text for each)
 1. Feature image: one focal point, solid background, no Shopify logo, not a copy of the introduction.
 2. Screenshots, 3 to 6 desktop: home with the first-run checklist; the decision log with a skipped and a dry-run row; the Salesforce

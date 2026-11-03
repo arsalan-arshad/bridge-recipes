@@ -1,3 +1,5 @@
+![Bridge Recipes: turn business buyers in paid orders into Salesforce Leads, dry-run first](docs/listing/readme-banner-1280x640.png)
+
 # Bridge Recipes — A Small Shopify → Salesforce Core, Shipped as Opinionated Recipes
 
 > **Open-Source (MIT)** | Cross-platform: Shopify × Salesforce | Open for PRs & Discussions
