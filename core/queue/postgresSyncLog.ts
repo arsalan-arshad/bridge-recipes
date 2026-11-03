@@ -36,10 +36,10 @@ export class PostgresSyncLog implements SyncLog {
   async record(e: LogEntry): Promise<void> {
     const ops = e.ops === undefined ? null : scrubEmails(JSON.stringify(e.ops));
     await this.pool.query(
-      `INSERT INTO ${this.schema}.sync_log (at, shop, recipe_id, topic, object_id, webhook_id, outcome, dry_run, reason, error_class, error_code, ops)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+      `INSERT INTO ${this.schema}.sync_log (at, shop, recipe_id, topic, object_id, webhook_id, outcome, dry_run, reason, error_class, error_code, ops, object_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)`,
       [e.at, e.shop, e.recipeId, e.topic, e.objectId, e.webhookId, e.outcome, e.dryRun, e.reason ?? null, e.errorClass ?? null,
-       e.errorCode === undefined ? null : scrubEmails(e.errorCode), ops],
+       e.errorCode === undefined ? null : scrubEmails(e.errorCode), ops, e.objectLabel ?? null],
     );
   }
 
@@ -53,13 +53,13 @@ export class PostgresSyncLog implements SyncLog {
     const limitIdx = vals.length;
     vals.push(Math.min(Math.max(filter.offset ?? 0, 0), 1_000_000));
     const r = await this.pool.query(
-      `SELECT at, shop, recipe_id, topic, object_id, webhook_id, outcome, dry_run, reason, error_class, error_code, ops
+      `SELECT at, shop, recipe_id, topic, object_id, webhook_id, outcome, dry_run, reason, error_class, error_code, ops, object_label
        FROM ${this.schema}.sync_log ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY at DESC, id DESC LIMIT $${limitIdx} OFFSET $${vals.length}`,
       vals,
     );
     return r.rows.map((x) => ({
       at: new Date(x.at).toISOString(), shop: x.shop, recipeId: x.recipe_id, topic: x.topic, objectId: x.object_id, webhookId: x.webhook_id,
-      outcome: x.outcome, dryRun: x.dry_run,
+      outcome: x.outcome, dryRun: x.dry_run, ...(x.object_label !== null ? { objectLabel: x.object_label } : {}),
       ...(x.reason !== null ? { reason: x.reason } : {}), ...(x.error_class !== null ? { errorClass: x.error_class } : {}),
       ...(x.error_code !== null ? { errorCode: x.error_code } : {}), ...(x.ops !== null ? { ops: x.ops } : {}),
     }));

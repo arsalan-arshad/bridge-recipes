@@ -542,9 +542,9 @@ test('the embedded /app surface: absent without SHOPIFY_API_KEY; with it, only a
     await until(async () => (await app.stores.syncLog.recent({ limit: 10 })).length === 2);
     const page = async (shop: string, route: string) => (await fetch(`${url}/app/api/${route}`, { headers: { Authorization: `Bearer ${tok(shop)}` } })).text();
     const mine = await page(SHOP, 'home');
-    assert.ok(mine.includes('DRY-RUN') && mine.includes('gid://shopify/Order/1') && !mine.includes('gid://shopify/Order/2'), 'a shop sees only its own decisions (home)');
+    assert.ok(mine.includes('DRY-RUN') && mine.includes('#1') && !mine.includes('#2') && !mine.includes('gid://'), 'a shop sees only its own decisions (home)');
     const mineLog = await page(SHOP, 'log');
-    assert.ok(mineLog.includes('gid://shopify/Order/1') && !mineLog.includes('gid://shopify/Order/2'), 'and in the log');
+    assert.ok(mineLog.includes('#1') && !mineLog.includes('#2') && !mineLog.includes('gid://'), 'and in the log');
     const token = (shop: string) => ({ Authorization: `Bearer ${tok(shop)}` });
     // A store that merely installed the app and sent a webhook (it is in the log) is NOT set up by the operator: no page for it.
     for (const route of ['home', 'log']) assert.equal((await fetch(`${url}/app/api/${route}`, { headers: token(OTHER) })).status, 403, `${route}: logged but never set up`);
