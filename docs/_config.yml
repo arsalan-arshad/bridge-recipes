@@ -1,0 +1,16 @@
+theme: jekyll-theme-minimal
+title: Bridge Recipes
+exclude:
+  - APP_STORE_LISTING.md
+  - BUILD_PLAN.md
+  - DEPLOY_RAILWAY.md
+  - EMBEDDED_UI.md
+  - INSTALL_SHOPIFY.md
+  - LEVEL2_READINESS.md
+  - R1_CONTRACT.md
+  - SETUP_SALESFORCE.md
+  - SPEC.md
+  - SUBMISSION_PACK.md
+  - listing
+  - research
+  - legal/INCIDENT_RESPONSE.md

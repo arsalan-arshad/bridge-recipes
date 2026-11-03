@@ -1,10 +1,12 @@
-# Privacy policy: Bridge Recipes (DRAFT for legal review)
+---
+title: "Privacy policy: Bridge Recipes"
+layout: default
+permalink: /legal/PRIVACY_POLICY.html
+---
 
-> **Draft.** Written from what the software does today. It has not been reviewed by a lawyer and is not legal advice. Square-bracket
-> items are decisions the operator must make before publishing. Publish it at a public URL and put that URL in the Shopify App Store
-> listing.
+# Privacy policy: Bridge Recipes
 
-Last updated: 2026-11-03. Contact for everything in this policy: arsalanarshad.dev@gmail.com
+Last updated: 2026-11-03. Not legal advice. Contact for everything in this policy: arsalanarshad.dev@gmail.com
 
 ## Who we are
 Bridge Recipes ("the app") connects a Shopify store to the store owner's own Salesforce org. The service is operated by Arsalan Arshad, an individual (the "operator"). For the personal data of a store's customers we act as a **processor** for the store (the merchant), who is the
@@ -37,7 +39,7 @@ Records the app writes to the merchant's Salesforce belong to the merchant. We c
 permission); after an erasure request the app lists the records the merchant should review there.
 
 ## Sub-processors and location
-Hosting and database: Railway (one service and one PostgreSQL database on the same provider), region [REGION: read from the Railway service settings]. Shopify and Salesforce are the merchant's own
+Hosting and database: Railway (one service and one PostgreSQL database on the same provider), region US West (California, USA). Shopify and Salesforce are the merchant's own
 platforms. No analytics, advertising, error-tracking or email services are used (the only outbound connection the service makes is to the merchant's own Salesforce domain).
 
 ## Security

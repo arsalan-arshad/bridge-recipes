@@ -1,7 +1,12 @@
-# Terms of use: Bridge Recipes (DRAFT for legal review)
+---
+title: "Terms of use: Bridge Recipes"
+layout: default
+permalink: /legal/TERMS_OF_USE.html
+---
 
-> **Draft.** Not reviewed by a lawyer. Square-bracket items need a decision. The software itself is MIT-licensed open source; these
-> terms cover the **hosted service** only.
+# Terms of use: Bridge Recipes
+
+Last updated: 2026-11-03. Not legal advice. The software is MIT-licensed open source; these terms cover the **hosted service** only.
 
 1. **The service.** Bridge Recipes reads paid-order events from your Shopify store and, when you turn a recipe LIVE, writes Leads and
    Tasks to your own Salesforce org. A new recipe starts in dry-run (it writes nothing).
