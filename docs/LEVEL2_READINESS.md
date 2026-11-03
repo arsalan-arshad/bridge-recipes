@@ -27,3 +27,8 @@ the honest state of this repository and the single Railway deployment; "not veri
 2. Verify and document: database encryption at rest, two-step sign-in on every account that can reach data. Decide how to answer the backup gap (buy a plan with backups, or a different host) or state it plainly to the reviewer; there is no restore test because there is nothing to restore.
 3. Add a staging service so tests never touch production data.
 4. Request protected customer data access in the Partner Dashboard with the minimum fields, and prepare for a data protection review.
+
+## Protected-data questionnaire: saved as a draft in the Partner Dashboard on 2026-11-03 (not submitted)
+Tell merchants what is processed: **No** (until the policy is published). Merchant agreements: **No** (until the terms are published). Encrypt at rest and in transit: **No** (at rest not verified). Limit staff access: **Yes** (one operator). Backups: **No**. Test and production separation: **No**. Data loss prevention: **No**. Undecided (owner): strong passwords, incident response.
+
+Railway facts read in the dashboard on 2026-11-03: Postgres and app in US West (California, USA); Postgres public access off (private address in use); volume encryption not shown in the settings (not verified); no backups (Pro only).

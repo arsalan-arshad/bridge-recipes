@@ -8,17 +8,19 @@ Nothing here has been submitted. Submitting is the owner's decision. Rules are s
 - **App name:** Bridge Recipes (must be unique, and similar to the name in the Dev Dashboard; the Dev Dashboard name today is the
   development app's name, so rename it or create a production app first: Shopify advises choosing the distribution method on the
   production app).
-- **App introduction (100 characters, benefit-led, no keyword stuffing):** "Turn business buyers in your Shopify orders into Salesforce Leads, after a safe dry-run first." (94 characters)
+- **App introduction (100 characters; the editor rejects the word "Shopify" here):** "Turn business buyers in your paid orders into Salesforce Leads, after a safe dry-run first." (91 characters)
+- **Subtitle:** "Spot business buyers in orders and add them to Salesforce"
+- **Search terms:** salesforce, b2b leads, lead capture, business buyers, crm leads
+- **Category:** still open (owner picks; no CRM category exists).
 - **Details:** Bridge Recipes watches paid orders and spots buyers who look like businesses (a company billing name, or a company email
   domain). In dry-run it only shows what it would do. When you turn it on, it creates a Lead in your Salesforce, adds the order to a
   Lead you already have, or logs a Task on an existing Account or Contact. It never deletes or merges anything, honours your
   customers' marketing consent by default, and keeps nothing it does not need.
-- **Feature list:** dry-run first, nothing written until you go live; one kill switch; decision log with the reason for every order;
-  consent filter on by default; free-mail domains skipped; duplicate-safe; set-up guide and a read-only "Check my setup" for Salesforce.
+- **Features (as saved in the editor):** 1 "Dry-run first: nothing is written to Salesforce until you go live"; 2 "One kill switch that stops all writing at once"; 3 "Decision log with the reason for every order"; 4 "Marketing-consent filter on by default; free-mail domains skipped"; 5 "Duplicate-safe, with a guided Salesforce setup and read-only check".
 - **Integrations:** Salesforce.
-- **Pricing details:** free. (Pricing may appear only in the pricing section, never in images or text elsewhere.)
-- **Support:** arsalanarshad.dev@gmail.com. **Privacy policy URL:** [publish `docs/legal/PRIVACY_POLICY.md` first].
-- **Install eligibility:** Online Store sales channel; no country limits. [Confirm after the first real storefront order.]
+- **Pricing details:** a public plan "Free" (handle `free`) exists. (Pricing may appear only in the pricing section, never in images or text elsewhere.)
+- **Support:** arsalanarshad.dev@gmail.com. **Privacy policy URL:** https://arsalan-arshad.github.io/bridge-recipes/legal/PRIVACY_POLICY.html (live once Pages is on); terms: .../legal/TERMS_OF_USE.html.
+- **Install eligibility:** "doesn't require Online Store or POS" (the app only reads orders); no country limits.
 
 ## Images (all 1600 x 900, 16:9, no pricing, no personal data, alt text for each)
 1. Feature image: one focal point, solid background, no Shopify logo, not a copy of the introduction.
