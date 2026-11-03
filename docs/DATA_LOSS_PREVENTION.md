@@ -26,7 +26,7 @@ records, audit entries, privacy-request records, and short-lived queued order no
 - **No backups.** The Railway plan in use (Hobby) has no automatic backups. Railway documents volume backups and point-in-time recovery for
   PostgreSQL, but those are not available on this plan, and we take no manual dumps (a manual encrypted dump was designed and dropped on
   2026-11-03). If the database is lost, the data below is lost.
-- **No staging environment.** Tests run against a local database; the only hosted service is production.
+- **No hosted staging.** `docker-compose.staging.yml` and `docs/ENVIRONMENTS.md` describe a local staging with its own database, but it has not been run; the only hosted service is production. Tests run against a local database.
 - **No independent check** of the at-rest encryption beyond Railway's statement.
 
 ## If the database were lost: what can and cannot be rebuilt
@@ -42,5 +42,5 @@ records, audit entries, privacy-request records, and short-lived queued order no
 
 ## Options to close the gaps (owner's decision)
 1. A Railway plan that includes volume backups and PostgreSQL point-in-time recovery (confirm the current plan terms and price in the dashboard).
-2. A second Railway service as staging, so tests and review runs never touch production.
+2. A second Railway service as hosted staging (the local one needs a tunnel to receive Shopify webhooks).
 3. Manual encrypted dumps (was designed, rejected as manual and single-operator).
