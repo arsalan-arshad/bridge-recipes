@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { homeFragment, jobsFragment, logFragment, logPath, maskKey, onboardingSteps, privacyDetailFragment, privacyFragment, settingsFragment, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
+import { homeFragment, jobsFragment, logFragment, logPath, maskKey, maskOrgHost, onboardingSteps, privacyDetailFragment, privacyFragment, settingsFragment, setupFragment, LOG_OUTCOMES, NOTICES } from './pages.ts';
 import type { HomeData, JobsData, SetupData, SettingsData } from './pages.ts';
 import type { LogEntry } from '../worker/syncLog.ts';
 
@@ -113,7 +113,7 @@ test('setup: the forms post only to our write routes, and the secret field is a 
   assert.deepEqual(posts, ['/app/api/connection', '/app/api/verify', '/app/api/recipe', '/app/api/recipe']);
   assert.ok(html.includes('<s-password-field label="Consumer secret" name="clientSecret" autocomplete="off"></s-password-field>'));
   assert.ok(!/<s-password-field[^>]*value=/.test(html), 'no value attribute on the secret field');
-  assert.ok(html.includes('Org: https://acme.my.salesforce.com · client id: ••••') && !html.includes('KEY123'), 'a short key is fully masked');
+  assert.ok(html.includes('Org: ac***.my.salesforce.com · client id: ••••') && !html.includes('KEY123'), 'a short key is fully masked');
   assert.ok(html.includes('Replace connection') && html.includes('Test connection'));
   assert.ok(html.includes('<s-badge tone="success">stored (encrypted)</s-badge>') && !html.includes('<s-badge tone="caution">not set</s-badge>'));
   const fresh = setupFragment(setup());
@@ -287,4 +287,15 @@ test('the guide page lists the steps, offers the check, and escapes anything it 
 test('the first-run checklist links to the Salesforce setup guide, and the Set up page does too', () => {
   assert.ok(homeFragment(fresh()).includes('data-view="/app/api/guide">Open the Salesforce setup guide</s-button>'));
   assert.ok(setupFragment({ shop: 's', connection: { stored: false, lastVerifiedAt: null }, recipe: { name: 'R', configured: false, enabled: false, dryRun: true } }).includes('data-view="/app/api/guide"'));
+});
+
+test('the org host is masked on the Set up page and order numbers replace gids in the log', () => {
+  assert.equal(maskOrgHost('https://acme.my.salesforce.com'), 'ac***.my.salesforce.com');
+  assert.equal(maskOrgHost('acme-dev-ed.my.salesforce.com/'), 'ac***.my.salesforce.com/'.replace('/', ''));
+  assert.equal(maskOrgHost(''), '***');
+  assert.ok(!setupFragment(setup({ connection: { stored: true, lastVerifiedAt: null, loginUrl: 'https://acme.my.salesforce.com', clientId: 'K' } })).includes('acme'));
+  const withName = logFragment({ entries: [entry({ objectId: 'gid://shopify/Order/18967675011125', objectLabel: '#1020' })] } as any);
+  assert.ok(withName.includes('#1020') && !withName.includes('gid://'));
+  const old = logFragment({ entries: [entry({ objectId: 'gid://shopify/Order/18967675011125' })] } as any);
+  assert.ok(old.includes('18967675011125') && !old.includes('gid://'), 'older rows without a label show the id without the gid prefix');
 });

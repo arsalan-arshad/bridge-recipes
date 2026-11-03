@@ -23,7 +23,17 @@ function outcomeTone(outcome: string): Tone {
   return 'neutral';
 }
 
+// The merchant's My Domain host is shown masked ("my***.my.salesforce.com"): enough to tell orgs apart, not a lead for strangers.
+export function maskOrgHost(url: string): string {
+  const m = /^(https?:\/\/)?([^./:]+)(\.[^/\s]*)?/i.exec(url.trim());
+  if (!m) return '***';
+  return `${m[2].slice(0, 2)}***${m[3] ?? ''}`;
+}
+
 const view = (path: string, label: string, variant = 'tertiary') => `<s-button variant="${variant}" data-view="${esc(path)}">${esc(label)}</s-button>`;
+
+// The order number when the log has it ("#1020"); older entries show the id with the gid prefix removed.
+const orderCell = (e: LogEntry) => e.objectLabel || e.objectId.replace(/^gid:\/\/shopify\/Order\//, '');
 
 function decisionsTable(entries: LogEntry[], full: boolean): string {
   const head = full
@@ -34,8 +44,8 @@ function decisionsTable(entries: LogEntry[], full: boolean): string {
     const outcome = `${badge(e.outcome, outcomeTone(e.outcome))}${e.dryRun ? ' <s-text color="subdued">dry-run</s-text>' : ''}`;
     const ops = (e.ops ?? []).map((o) => `${esc(o.kind)}: ${esc(o.outcome)}${o.sfId ? ` <s-text type="code">${esc(o.sfId)}</s-text>` : ''}`).join('<br>');
     const cells = full
-      ? `<s-table-cell>${esc(e.at)}</s-table-cell><s-table-cell>${outcome}</s-table-cell><s-table-cell><s-text type="code">${esc(e.objectId)}</s-text></s-table-cell><s-table-cell><s-text type="code">${esc(e.webhookId)}</s-text></s-table-cell><s-table-cell>${why}</s-table-cell><s-table-cell>${ops}</s-table-cell>`
-      : `<s-table-cell>${esc(e.at)}</s-table-cell><s-table-cell>${outcome}</s-table-cell><s-table-cell><s-text type="code">${esc(e.objectId)}</s-text></s-table-cell><s-table-cell>${why}</s-table-cell>`;
+      ? `<s-table-cell>${esc(e.at)}</s-table-cell><s-table-cell>${outcome}</s-table-cell><s-table-cell><s-text type="code">${esc(orderCell(e))}</s-text></s-table-cell><s-table-cell><s-text type="code">${esc(e.webhookId)}</s-text></s-table-cell><s-table-cell>${why}</s-table-cell><s-table-cell>${ops}</s-table-cell>`
+      : `<s-table-cell>${esc(e.at)}</s-table-cell><s-table-cell>${outcome}</s-table-cell><s-table-cell><s-text type="code">${esc(orderCell(e))}</s-text></s-table-cell><s-table-cell>${why}</s-table-cell>`;
     return `<s-table-row>${cells}</s-table-row>`;
   }).join('');
   if (entries.length === 0) return '<s-paragraph>No decisions yet. When a paid order arrives, each decision the recipe makes appears here.</s-paragraph>';
@@ -176,7 +186,7 @@ export function setupFragment(d: SetupData): string {
   const connProblem = d.connError ? `<s-banner tone="critical" heading="Connection problem">${esc(d.connError)}</s-banner>` : '';
   const c = d.connection;
   const status = c.stored
-    ? `${badge('stored (encrypted)', 'success')} <s-text color="subdued">${c.lastVerifiedAt ? `last verified ${esc(c.lastVerifiedAt)}` : 'not verified yet'}</s-text>${c.loginUrl ? `<br><s-text color="subdued">Org: ${esc(c.loginUrl)}${c.clientId ? ` · client id: ${esc(maskKey(c.clientId))}` : ''}</s-text>` : ''}`
+    ? `${badge('stored (encrypted)', 'success')} <s-text color="subdued">${c.lastVerifiedAt ? `last verified ${esc(c.lastVerifiedAt)}` : 'not verified yet'}</s-text>${c.loginUrl ? `<br><s-text color="subdued">Org: ${esc(maskOrgHost(c.loginUrl))}${c.clientId ? ` · client id: ${esc(maskKey(c.clientId))}` : ''}</s-text>` : ''}`
     : badge('not set', 'caution');
   const post = (path: string, inner: string) => `<form data-post="${esc(path)}">${inner}</form>`;
   const act = (value: string) => `<input type="hidden" name="action" value="${esc(value)}">`;

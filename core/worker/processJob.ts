@@ -50,7 +50,9 @@ export async function processJob(job: Job, deps: WorkerDeps): Promise<JobOutcome
   const settings = await deps.configs.get(job.shop, recipe.id);
   if (!settings || !settings.enabled) return done(base({ recipeId: recipe.id, outcome: 'recipe_disabled' }));
   const dryRun = settings.dryRun;
-  const mk = (over: Partial<LogEntry> & Pick<LogEntry, 'outcome'>, objectId = '') => base({ recipeId: recipe.id, dryRun, objectId, ...over });
+  let objectLabel: string | undefined; // set once the payload is mapped; every later entry for this job carries it
+  const mk = (over: Partial<LogEntry> & Pick<LogEntry, 'outcome'>, objectId = '') =>
+    base({ recipeId: recipe.id, dryRun, objectId, ...(objectLabel ? { objectLabel } : {}), ...over });
 
   let payload: unknown;
   try {
@@ -62,6 +64,7 @@ export async function processJob(job: Job, deps: WorkerDeps): Promise<JobOutcome
   if (!mapped.ok) return done(mk({ outcome: 'invalid_payload', reason: mapped.reason }));
   const event = mapped.event;
   const objectId = recipe.objectIdOf(event);
+  objectLabel = recipe.labelOf?.(event).slice(0, 40);
 
   try {
     // Rules that need no Salesforce data decide first: such a skip is final and costs zero API calls.

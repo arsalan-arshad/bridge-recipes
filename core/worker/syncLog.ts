@@ -15,6 +15,7 @@ export interface LogEntry {
   recipeId: string;
   topic: string;
   objectId: string;
+  objectLabel?: string; // human name of the object (an order number such as #1020); never personal data
   webhookId: string;
   outcome: JobOutcome;
   dryRun: boolean;

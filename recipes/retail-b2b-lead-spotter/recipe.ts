@@ -13,6 +13,7 @@ export const r1Recipe: Recipe<OrderPaidEvent, Context, Config> = {
   mapEvent: mapOrderPaid,
   minimize: minimizeOrderPaid,
   objectIdOf: (e) => e.orderId,
+  labelOf: (e) => e.orderName,
   emptyContext: () => ({ accountByDomain: null, existingByEmail: null }),
   buildContext,
   decide,
