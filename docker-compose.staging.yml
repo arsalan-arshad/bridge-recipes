@@ -1,0 +1,37 @@
+# Staging: its own Postgres and its own app, on your machine. It NEVER touches the production database: DATABASE_URL below is fixed to
+# the staging database container, and the app container does not read the production DATABASE_URL from any file.
+# Use: cp .env.staging.example .env.staging, fill the three values, then `docker compose -f docker-compose.staging.yml up`.
+# See docs/ENVIRONMENTS.md. Not run in CI.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: staging
+      POSTGRES_PASSWORD: staging-only-not-a-secret
+      POSTGRES_DB: bridge_staging
+    ports:
+      - "127.0.0.1:5433:5432"   # reachable from this machine only
+    volumes:
+      - staging_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U staging -d bridge_staging"]
+      interval: 5s
+      retries: 10
+  app:
+    image: node:24
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: sh -c "npm ci --omit=dev && node core/app/main.ts"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env.staging
+    environment:
+      DATABASE_URL: postgresql://staging:staging-only-not-a-secret@db:5432/bridge_staging
+      PORT: "8787"
+    ports:
+      - "127.0.0.1:8787:8787"
+volumes:
+  staging_db: {}
